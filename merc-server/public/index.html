@@ -1,0 +1,3417 @@
+<meta charset="UTF-8" />
+<title>Merc Protocol</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    /* rave-club palette: red / white / black, kept as high-contrast as the
+       original variable names imply so every existing usage still reads --
+       "cyan" is now the white friendly accent, "danger"/"amber" are the reds */
+    --bg:#0a0508;
+    --steel:#160709;
+    --panel:rgba(18,6,9,0.84);
+    --panel-edge:rgba(255,25,45,0.4);
+    --cyan:#f5f0f2;
+    --danger:#ff1b34;
+    --amber:#ff4a56;
+    --text:#f3e9ea;
+    --text-dim:#8a5860;
+    /* rare "corporate network" accent -- used sparingly for technical readouts
+       and the site-select tags only, never as a base HUD color */
+    --purple:#8a63ff;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;padding:0;width:100%;height:100%;overflow:hidden;
+    background:var(--bg);color:var(--text);
+    font-family:'Share Tech Mono',monospace;
+    -webkit-font-smoothing:antialiased;
+  }
+  #gameCanvas{position:fixed;inset:0;display:block;outline:none;}
+  .mono{font-family:'Orbitron',sans-serif;}
+
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:10;font-variant-numeric:tabular-nums;}
+  #hud.hidden{display:none;}
+
+  .panel{
+    position:relative;
+    background:
+      radial-gradient(ellipse 85% 160% at 50% 50%, rgba(255,27,52,0.05), transparent 70%),
+      var(--panel);
+    border:1px solid var(--panel-edge);
+    clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
+    box-shadow:0 0 20px rgba(255,23,52,0.06), inset 0 0 16px rgba(255,23,52,0.03);
+  }
+  .panel.danger{border-color:rgba(255,59,59,0.45);}
+  /* thin white corner-bracket frame accents -- the camera-viewfinder motif from
+     the reference sheets, done as one pseudo-element collage of 8 tiny corner
+     line segments so it works on every panel without extra markup */
+  .panel::before{
+    /* kept INSIDE the box (not outset) -- the panel's own clip-path polygon
+       would otherwise clip away anything extending past the box edges */
+    content:''; position:absolute; inset:2px; pointer-events:none; z-index:2;
+    background-image:
+      linear-gradient(rgba(255,255,255,.85),rgba(255,255,255,.85)), linear-gradient(rgba(255,255,255,.85),rgba(255,255,255,.85)),
+      linear-gradient(rgba(255,255,255,.85),rgba(255,255,255,.85)), linear-gradient(rgba(255,255,255,.85),rgba(255,255,255,.85)),
+      linear-gradient(rgba(255,255,255,.85),rgba(255,255,255,.85)), linear-gradient(rgba(255,255,255,.85),rgba(255,255,255,.85)),
+      linear-gradient(rgba(255,255,255,.85),rgba(255,255,255,.85)), linear-gradient(rgba(255,255,255,.85),rgba(255,255,255,.85));
+    background-repeat:no-repeat;
+    background-size:12px 2px, 2px 12px, 12px 2px, 2px 12px, 12px 2px, 2px 12px, 12px 2px, 2px 12px;
+    background-position:
+      top 0 left 0, top 0 left 0,
+      top 0 right 0, top 0 right 0,
+      bottom 0 left 0, bottom 0 left 0,
+      bottom 0 right 0, bottom 0 right 0;
+  }
+
+  /* small monospace technical readout labels -- the "../Ecorp_Classified.."
+     style tags scattered around the reference panels. Static text updated at
+     most a few times a second from JS, never per animation frame. */
+  .readout{position:absolute; font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:.12em; color:var(--purple); text-transform:uppercase; opacity:.75; white-space:nowrap;}
+  #sigTag{left:22px; bottom:112px;}
+  #mpTag{left:22px; bottom:130px; color:#51e8ff;}
+  #mpTag.hidden{display:none;}
+  #statusTag{top:66px; left:50%; transform:translateX(-50%); color:var(--text-dim); opacity:.9; background:rgba(10,5,8,0.55); padding:2px 10px; border:1px solid rgba(255,255,255,0.08);}
+  #statusTag.combat{color:#fff; opacity:1; background:rgba(60,4,10,0.65); border-color:rgba(255,59,59,.5); text-shadow:0 0 6px rgba(255,27,52,.8);}
+  #vitalsBarcode{position:absolute; right:6px; top:6px; bottom:6px; width:16px; opacity:.35;
+    background-image:repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 3px, #fff 3px 4px, transparent 4px 8px, #fff 8px 9px, transparent 9px 13px);
+  }
+  #vitals{position:absolute; left:20px; bottom:20px; width:290px; padding:12px 16px; display:flex; flex-direction:column; gap:8px;}
+  .bar-row{display:flex; align-items:center; gap:10px;}
+  .bar-label{width:60px; font-size:10px; letter-spacing:.14em; color:var(--text-dim); text-transform:uppercase;}
+  .bar-track{flex:1; height:10px; background:rgba(255,255,255,0.05); position:relative; clip-path:polygon(6px 0,100% 0,100% 100%,0 100%,0 6px);}
+  .bar-fill{height:100%; transition:width .12s ease-out;}
+  .bar-fill.hp{background:linear-gradient(90deg,#5c0f18,#ff1b34); box-shadow:0 0 8px rgba(255,27,52,.55);}
+  .bar-fill.sp{background:linear-gradient(90deg,#4a3437,#f5f0f2); box-shadow:0 0 8px rgba(245,240,242,.5);}
+  .bar-num{width:34px; text-align:right; font-size:12px; font-weight:700;}
+
+  #ammoBox{position:absolute; right:20px; bottom:20px; padding:10px 18px; text-align:right;}
+  #ammoCount{font-family:'Orbitron',sans-serif; font-size:30px; font-weight:900;}
+  #ammoCount .max{font-size:14px; color:var(--text-dim); font-weight:600;}
+  #reloadTag{font-size:10px; letter-spacing:.16em; color:var(--amber); text-transform:uppercase; height:13px;}
+
+  #abilityBar{position:absolute; left:50%; bottom:20px; transform:translateX(-50%); display:flex; gap:10px; align-items:flex-end;}
+  .ability{position:relative; width:58px; height:58px; display:flex; align-items:center; justify-content:center; overflow:hidden;}
+  .ability-fill{position:absolute; left:0; bottom:0; width:100%; background:rgba(255,59,59,0.22); transition:height .1s linear;}
+  .ability .key{position:absolute; top:3px; left:5px; font-size:9px; color:var(--text-dim); letter-spacing:.1em; z-index:2;}
+  .ability .cd-num{position:absolute; bottom:3px; right:5px; font-size:10px; color:var(--text); z-index:2; font-family:'Orbitron',sans-serif;}
+  .ability-icon{font-family:'Orbitron',sans-serif; font-size:19px; font-weight:800; color:var(--danger); text-shadow:0 0 8px rgba(255,59,59,.7); z-index:1; opacity:.55;}
+  .ability.ready{box-shadow:0 0 16px rgba(255,59,59,.45), inset 0 0 14px rgba(255,59,59,.08); border-color:rgba(255,59,59,.6);}
+  .ability.ready .ability-icon{color:#fff; opacity:1;}
+  #ab-dash .ability-fill{background:rgba(245,240,242,0.20);}
+  #ab-dash .ability-icon{color:#f5f0f2; text-shadow:0 0 8px rgba(245,240,242,.7);}
+  #ab-dash.ready{box-shadow:0 0 16px rgba(245,240,242,.5), inset 0 0 14px rgba(245,240,242,.1); border-color:rgba(245,240,242,.65);}
+  #ab-nova .ability-fill{background:rgba(255,27,52,0.22);}
+  #ab-nova .ability-icon{color:var(--danger); text-shadow:0 0 8px rgba(255,27,52,.7);}
+  #ab-nova.ready{box-shadow:0 0 16px rgba(255,27,52,.5), inset 0 0 14px rgba(255,27,52,.1); border-color:rgba(255,27,52,.65);}
+  #ab-surge .ability-fill{background:rgba(255,214,217,0.20);}
+  #ab-surge .ability-icon{color:#ffd6d9; text-shadow:0 0 8px rgba(255,214,217,.7);}
+  #ab-surge.ready{box-shadow:0 0 16px rgba(255,214,217,.5), inset 0 0 14px rgba(255,214,217,.1); border-color:rgba(255,214,217,.65);}
+
+  #scoreboard{position:absolute; top:18px; left:50%; transform:translateX(-50%); padding:7px 24px; display:flex; gap:24px; align-items:center;}
+  .score-item{display:flex; flex-direction:column; align-items:center; line-height:1.1;}
+  .score-item .n{font-family:'Orbitron',sans-serif; font-size:18px; font-weight:800;}
+  .score-item .l{font-size:9px; letter-spacing:.16em; color:var(--text-dim); text-transform:uppercase;}
+
+  #killfeed{position:absolute; top:18px; right:20px; width:250px; display:flex; flex-direction:column; gap:5px; align-items:flex-end;}
+  .kf-entry{padding:5px 10px; font-size:12px; font-weight:600; background:var(--panel); border:1px solid rgba(255,255,255,0.08); animation:kfIn .18s ease-out; white-space:nowrap; clip-path:polygon(8px 0,100% 0,100% 100%,0 100%,0 8px);}
+  .kf-entry b{color:var(--danger);}
+  .kf-entry.you b{color:#f5f0f2;}
+  @keyframes kfIn{from{opacity:0; transform:translateX(12px);} to{opacity:1; transform:translateX(0);}}
+
+  #crosshair{position:absolute; top:50%; left:50%; width:34px; height:34px; transform:translate(-50%,-50%); pointer-events:none;}
+  #crosshair i{position:absolute; background:#f5f0f2; box-shadow:0 0 5px rgba(245,240,242,.7); transition:transform .06s ease-out, background .1s;}
+  #crosshair .h{top:50%; left:6px; width:8px; height:2px; margin-top:-1px;}
+  #crosshair .h2{top:50%; right:6px; width:8px; height:2px; margin-top:-1px;}
+  #crosshair .v{left:50%; top:6px; height:8px; width:2px; margin-left:-1px;}
+  #crosshair .v2{left:50%; bottom:6px; height:8px; width:2px; margin-left:-1px;}
+  #crosshair.spread .h{transform:translateX(-4px);} #crosshair.spread .h2{transform:translateX(4px);}
+  #crosshair.spread .v{transform:translateY(-4px);} #crosshair.spread .v2{transform:translateY(4px);}
+  #crosshair.hitmarker i{background:var(--danger); box-shadow:0 0 8px rgba(255,59,59,.9);}
+  #crosshair-dot{position:absolute; top:50%; left:50%; width:3px; height:3px; margin:-1.5px 0 0 -1.5px; background:#fff; border-radius:50%;}
+
+  #dmgVignette{position:absolute; inset:0; pointer-events:none; box-shadow: inset 0 0 0 0 rgba(255,59,59,0); transition:box-shadow .08s ease-out;}
+  #speedlines{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .15s; background:radial-gradient(circle at 50% 50%, transparent 35%, rgba(255,23,52,0.08) 100%);}
+  /* the ultimate/flight readouts break from the red house-style on purpose --
+     white-hot against the red HUD reads as the one "everything goes white"
+     strobe moment, same trick a rave uses when the drop hits */
+  #flightTag{position:absolute; top:64px; left:50%; transform:translateX(-50%) translateY(-6px); padding:6px 16px; display:flex; align-items:center; gap:8px; opacity:0; transition:opacity .18s, transform .18s; pointer-events:none; clip-path:polygon(8px 0,100% 0,100% 100%,0 100%,0 8px); border-color:rgba(245,240,242,.6); box-shadow:0 0 18px rgba(245,240,242,.45);}
+  #flightTag.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  #flightTag .sb-label{font-size:11px; letter-spacing:.16em; color:#f5f0f2; text-transform:uppercase; font-weight:700; text-shadow:0 0 8px rgba(245,240,242,.8);}
+  #flightTag .sb-num{font-family:'Orbitron',sans-serif; font-size:13px; font-weight:800; color:#fff;}
+  #ultBar{position:absolute; left:50%; bottom:88px; transform:translateX(-50%); width:230px; padding:5px 12px; display:flex; align-items:center; gap:8px;}
+  #ultBar .ult-track{flex:1; height:7px; background:rgba(255,255,255,0.06); position:relative; clip-path:polygon(4px 0,100% 0,100% 100%,0 100%,0 4px);}
+  #ultBar .ult-fill{height:100%; width:0%; background:linear-gradient(90deg,#7a2c33,#f5f0f2); box-shadow:0 0 8px rgba(245,240,242,.5); transition:width .15s linear;}
+  #ultBar .ult-label{font-size:10px; letter-spacing:.14em; color:var(--text-dim); text-transform:uppercase; white-space:nowrap;}
+  #ultBar.ready .ult-label{color:#f5f0f2; text-shadow:0 0 6px rgba(245,240,242,.7);}
+  #ultBar.ready{box-shadow:0 0 16px rgba(245,240,242,.45); border-color:rgba(245,240,242,.6); animation:ultPulse 0.6s ease-in-out infinite alternate;}
+  @keyframes ultPulse{ from{ box-shadow:0 0 12px rgba(245,240,242,.35); } to{ box-shadow:0 0 26px rgba(245,240,242,.75); } }
+  #scanlines{position:absolute;inset:0;pointer-events:none;opacity:.05;background:repeating-linear-gradient(0deg,#fff 0px,transparent 1px,transparent 3px);mix-blend-mode:overlay;}
+  #vignetteFixed{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 160px 40px rgba(0,0,0,0.55);}
+
+  .overlay{position:fixed; inset:0; z-index:30; display:flex; align-items:center; justify-content:center; background:radial-gradient(ellipse at 50% 25%, rgba(70,8,16,.4), rgba(3,1,3,.96) 72%); overflow-y:auto; padding:16px 0;}
+  .overlay.hidden{display:none;}
+
+  #menu .stack{display:flex; flex-direction:column; align-items:center; gap:24px; text-align:center; max-width:640px; padding:0 20px;}
+  .eyebrow{margin:0; font-size:13px; letter-spacing:.34em; text-transform:uppercase; color:var(--text-dim);}
+  .title{font-family:'Orbitron',sans-serif; font-weight:900; font-size:clamp(38px,6.4vw,68px); letter-spacing:.02em; margin:0; line-height:1; color:#fbf1f2; text-shadow:0 0 18px rgba(255,23,52,.55), 0 0 46px rgba(255,23,52,.25);}
+  .title span{color:var(--danger); text-shadow:0 0 18px rgba(255,23,52,.7);}
+  .title.boot{animation:titleBoot 0.6s steps(2,end) 1;}
+  @keyframes titleBoot{
+    0%{ opacity:0; clip-path:inset(0 0 100% 0); transform:translateX(-6px); }
+    15%{ opacity:1; clip-path:inset(0 40% 0 0); transform:translateX(4px); }
+    30%{ clip-path:inset(0 0 60% 0); transform:translateX(-3px); }
+    45%{ clip-path:inset(20% 0 0 30%); transform:translateX(3px); }
+    60%{ clip-path:inset(0 0 0 0); transform:translateX(-1px); }
+    100%{ opacity:1; clip-path:inset(0 0 0 0); transform:translateX(0); }
+  }
+  .lede{margin:0; font-size:14px; letter-spacing:.02em; color:var(--text-dim); max-width:520px; line-height:1.5;}
+
+  #objectiveBar{position:absolute; top:70px; left:50%; transform:translateX(-50%); width:300px;}
+  #objectiveBar.hidden{display:none;}
+  .obj-top{display:flex; justify-content:space-between; font-family:'Orbitron',sans-serif; font-size:10px; letter-spacing:.08em; color:var(--text-dim); margin-bottom:5px;}
+  .obj-top span:first-child{color:var(--text);}
+  .obj-track{height:8px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); position:relative; overflow:hidden;}
+  .obj-fill{height:100%; width:0%; background:linear-gradient(90deg, var(--cyan), #ffffff); transition:background-color .2s;}
+  .obj-fill.contested{background:linear-gradient(90deg, #ff3b3b, #ffab2e);}
+  #fullScoreboard{position:absolute; top:70px; left:50%; transform:translateX(-50%); width:360px; padding:14px 18px; background:rgba(6,4,6,0.88); border:1px solid rgba(255,255,255,0.16); backdrop-filter:blur(3px); z-index:20; clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);}
+  #fullScoreboard.hidden{display:none;}
+  .fsb-title{font-family:'Orbitron',sans-serif; font-size:10px; letter-spacing:.1em; color:var(--text-dim); text-align:center; margin-bottom:10px;}
+  .fsb-title .key{font-size:9px; padding:1px 5px;}
+  .fsb-head, .fsb-row{display:grid; grid-template-columns:1fr 60px 60px; font-family:'Share Tech Mono',monospace; font-size:11px; padding:4px 2px;}
+  .fsb-head{color:var(--text-dim); letter-spacing:.08em; border-bottom:1px solid rgba(255,255,255,0.14); padding-bottom:6px; margin-bottom:2px;}
+  .fsb-row{color:var(--text); border-bottom:1px solid rgba(255,255,255,0.05);}
+  .fsb-row.fsb-you{color:#fff; background:rgba(255,255,255,0.05);}
+  .fsb-row.fsb-dead{opacity:0.45;}
+  .fsb-row span:not(:first-child){text-align:center; font-variant-numeric:tabular-nums;}
+  #heroSelect{display:flex; gap:10px; margin-top:4px;}
+  .hero-blurb{font-size:10px; letter-spacing:.06em; color:var(--text-dim); max-width:440px; margin:0 0 4px;}
+  #levelSelect, #modeSelect, #arenaSelect{display:flex; gap:10px; flex-wrap:wrap; justify-content:center;}
+  .profile-bar{display:flex; gap:16px; align-items:center; justify-content:center; flex-wrap:wrap; font-family:'Share Tech Mono',monospace; font-size:11px; letter-spacing:.08em; color:var(--text-dim); background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.12); padding:7px 16px; clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);}
+  .profile-bar b{color:var(--text); font-weight:700;}
+  .profile-bar .online-dot{color:#51e8ff;}
+  .profile-bar .switch-link{background:none; border:none; color:var(--text-dim); text-decoration:underline; cursor:pointer; font-family:inherit; font-size:10px; letter-spacing:.08em; padding:0;}
+  .profile-bar .switch-link:hover{color:var(--text);}
+  .login-input{font-family:'Orbitron',sans-serif; font-weight:700; font-size:18px; letter-spacing:.12em; text-align:center; color:var(--text); background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.25); padding:12px 16px; width:280px; max-width:80vw; outline:none; text-transform:uppercase;}
+  .login-input:focus{border-color:var(--cyan);}
+  #pvpWaitTag{position:absolute; top:96px; left:50%; transform:translateX(-50%); color:#51e8ff; background:rgba(6,10,14,0.7); padding:4px 12px; border:1px solid rgba(81,232,255,0.4);}
+  #pvpWaitTag.hidden{display:none;}
+  .level-opt{font-family:'Orbitron',sans-serif; font-weight:700; font-size:12px; letter-spacing:.1em; color:var(--text-dim); background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.14); padding:8px 18px 7px; cursor:pointer; pointer-events:auto; display:flex; flex-direction:column; align-items:flex-start; gap:2px; clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px); transition:all .12s ease;}
+  .level-opt .lv-tag{font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:.16em; color:rgba(138,99,255,0.85); font-weight:400;}
+  .level-opt:hover{border-color:rgba(255,255,255,0.35); color:var(--text);}
+  .level-opt.active{color:#fff; border-color:var(--cyan); background:rgba(255,255,255,0.07); box-shadow:0 0 14px rgba(255,255,255,0.12), inset 0 0 10px rgba(255,255,255,0.05);}
+  .level-opt.locked, .level-opt:disabled{opacity:.32; cursor:not-allowed; pointer-events:none;}
+  .level-opt.active .lv-tag{color:#b79aff;}
+
+  .btn{font-family:'Orbitron',sans-serif; font-weight:800; font-size:16px; letter-spacing:.08em; padding:15px 44px; cursor:pointer; pointer-events:auto; background:linear-gradient(180deg, rgba(255,23,52,.18), rgba(255,23,52,.05)); border:1px solid var(--cyan); color:#e7f7fb; box-shadow:0 0 22px rgba(255,23,52,.3), inset 0 0 12px rgba(255,23,52,.1); clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px); transition:transform .12s ease, box-shadow .12s ease;}
+  .btn:hover{transform:translateY(-2px); box-shadow:0 0 32px rgba(255,23,52,.5), inset 0 0 16px rgba(255,23,52,.18);}
+  .btn:active{transform:translateY(0);}
+
+  .controls-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:9px 24px; font-size:12px; color:var(--text-dim); text-align:left; margin-top:4px;}
+  .controls-grid .row{display:flex; align-items:center; gap:9px;}
+  .key{font-family:'Orbitron',sans-serif; font-size:10px; font-weight:700; color:var(--text); border:1px solid rgba(255,23,52,.4); padding:4px 7px; min-width:18px; text-align:center; background:rgba(255,23,52,.05); clip-path:polygon(4px 0,100% 0,100% calc(100% - 4px),calc(100% - 4px) 100%,0 100%,0 4px);}
+
+  #pauseScreen .stack, #deathScreen .stack{display:flex;flex-direction:column;align-items:center;gap:14px;}
+  #settingsPanel{display:flex; flex-direction:column; gap:12px; width:340px; padding:16px 18px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.14); clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);}
+  .setting-row{display:grid; grid-template-columns:112px 1fr auto; align-items:center; gap:10px;}
+  .setting-row label{font-family:'Orbitron',sans-serif; font-size:9px; letter-spacing:.06em; color:var(--text-dim); white-space:nowrap;}
+  .setting-row input[type="range"]{-webkit-appearance:none; appearance:none; height:3px; background:rgba(255,255,255,0.2); outline:none; cursor:pointer;}
+  .setting-row input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none; appearance:none; width:12px; height:12px; background:var(--cyan); border-radius:0; cursor:pointer;}
+  .setting-row input[type="range"]::-moz-range-thumb{width:12px; height:12px; background:var(--cyan); border:none; border-radius:0; cursor:pointer;}
+  .setting-val{font-size:11px; color:var(--text); min-width:28px; text-align:right;}
+  #deathTitle{font-family:'Orbitron',sans-serif; font-weight:900; font-size:48px; color:var(--danger); text-shadow:0 0 22px rgba(255,59,59,.6); letter-spacing:.05em;}
+  #respawnTimer{font-size:14px; letter-spacing:.18em; color:var(--text-dim); text-transform:uppercase;}
+
+  #loading{position:fixed; inset:0; z-index:40; display:flex; flex-direction:column; gap:14px; align-items:center; justify-content:center; background:var(--bg); color:var(--text-dim); font-family:'Orbitron',sans-serif; letter-spacing:.2em; font-size:12px;}
+  #loading.hidden{display:none;}
+  #loading .boot-label{font-weight:800; letter-spacing:.28em;}
+  #loading .boot-sub{font-family:'Share Tech Mono',monospace; font-size:9px; letter-spacing:.18em; color:var(--purple); opacity:.8;}
+  #loadbar{width:260px; height:3px; background:rgba(255,23,52,.12); position:relative;}
+  #loadbarFill{height:100%; width:0%; background:var(--cyan); box-shadow:0 0 8px rgba(255,23,52,.7); transition:width .2s;}
+  #loadbarcode{width:260px; height:10px; opacity:.4;
+    background-image:repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 4px, #fff 4px 5px, transparent 5px 7px, #fff 7px 9px, transparent 9px 14px, #fff 14px 15px, transparent 15px 20px);
+  }
+
+  ::selection{background:rgba(255,23,52,.3);}
+
+  /* touch controls -- only shown on touch-capable devices (see IS_TOUCH in
+     the script). Two virtual sticks (drag-anywhere-in-zone, not fixed-origin,
+     so a thumb can land anywhere in its corner) plus a small cluster of
+     tap buttons; sized generously since these are the only input method. */
+  #mobileControls.hidden{display:none;}
+  #mobileControls{position:absolute; inset:0; pointer-events:none; z-index:15;}
+  .joystick{position:absolute; bottom:26px; width:130px; height:130px; border-radius:50%; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.18); pointer-events:auto; touch-action:none;}
+  #joyMove{left:26px;}
+  #joyLook{right:26px;}
+  .joyKnob{position:absolute; left:50%; top:50%; width:56px; height:56px; margin:-28px 0 0 -28px; border-radius:50%; background:rgba(255,255,255,0.16); border:1px solid rgba(255,255,255,0.4); transition:background .1s;}
+  .joystick.active .joyKnob{background:rgba(255,255,255,0.3);}
+  .mbtn{position:absolute; pointer-events:auto; touch-action:none; font-family:'Orbitron',sans-serif; font-weight:700; font-size:11px; letter-spacing:.08em; color:var(--text); background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.25); border-radius:50%; width:56px; height:56px;}
+  .mbtn:active{background:rgba(255,255,255,0.22);}
+  #btnFire{right:176px; bottom:96px; width:74px; height:74px; background:rgba(255,27,52,0.18); border-color:rgba(255,27,52,0.6); color:#fff;}
+  #btnFire:active{background:rgba(255,27,52,0.4);}
+  #btnJump{right:96px; bottom:186px;}
+  #btnReload{right:186px; bottom:200px;}
+  #btnUlt{right:20px; bottom:216px; border-color:rgba(255,255,255,0.5);}
+  #btnUlt.ready{border-color:#51e8ff; box-shadow:0 0 10px rgba(81,232,255,0.6); color:#51e8ff;}
+
+  /* on touch devices the keyboard-only ability bar / crosshair-dot mouse
+     hint are irrelevant; ability icons stay (tapping them still triggers
+     the ability) but sit higher so the joysticks don't cover them */
+  body.touch-device #abilityBar{bottom:172px;}
+  body.touch-device #ammoBox{top:60px; bottom:auto; right:20px;}
+  body.touch-device .controls-grid{display:none;}
+  body.touch-device #mpTag{bottom:150px;}
+
+  /* touch devices play this in landscape only -- there isn't enough width
+     in portrait for a centered ability bar plus two corner joysticks
+     without everything colliding, so portrait just asks for a rotate
+     instead of shipping a cramped, overlapping layout */
+  #rotatePrompt{position:fixed; inset:0; z-index:100; display:none; flex-direction:column; align-items:center; justify-content:center; gap:18px; background:var(--bg); color:var(--text); text-align:center; padding:30px;}
+  #rotatePrompt.hidden{display:none !important;}
+  #rotatePrompt.show{display:flex;}
+  #rotatePrompt .rotate-icon{font-size:52px; color:var(--cyan);}
+  #rotatePrompt p{font-family:'Orbitron',sans-serif; font-weight:700; letter-spacing:.14em; font-size:16px; line-height:1.8;}
+  #rotatePrompt p span{display:block; font-family:'Share Tech Mono',monospace; font-weight:400; letter-spacing:.1em; font-size:11px; color:var(--text-dim); margin-top:4px;}
+</style>
+
+<div id="loading">
+  <div class="boot-label">LOADING MERCENARY UNIT…</div>
+  <div class="boot-sub">Sys_Admin:&gt;/ Reboot.. ../Ecorp_Classified..</div>
+  <div id="loadbar"><div id="loadbarFill"></div></div>
+  <div id="loadbarcode"></div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="scanlines"></div>
+  <div id="vignetteFixed"></div>
+
+  <div id="sigTag" class="readout">SIG: MP-04 // SECTOR R9</div>
+  <div id="vitals" class="panel">
+    <div class="bar-row"><div class="bar-label">Armor</div><div class="bar-track"><div id="hpFill" class="bar-fill hp" style="width:100%"></div></div><div id="hpNum" class="bar-num mono">100</div></div>
+    <div class="bar-row"><div class="bar-label">Sprint</div><div class="bar-track"><div id="spFill" class="bar-fill sp" style="width:100%"></div></div><div id="spNum" class="bar-num mono">100</div></div>
+    <div id="vitalsBarcode"></div>
+  </div>
+
+  <div id="statusTag" class="readout">STATUS: NOMINAL</div>
+  <div id="scoreboard" class="panel">
+    <div class="score-item"><div class="n mono" id="killsNum">0</div><div class="l">Kills</div></div>
+    <div class="score-item"><div class="n mono" id="deathsNum">0</div><div class="l">Downs</div></div>
+    <div class="score-item"><div class="n mono" id="streakNum">0</div><div class="l">Streak</div></div>
+  </div>
+
+  <div id="killfeed"></div>
+
+  <div id="fullScoreboard" class="hidden">
+    <div class="fsb-title">HOLD <span class="key">TAB</span> // ROSTER</div>
+    <div class="fsb-head"><span>UNIT</span><span>KILLS</span><span>DOWNS</span></div>
+    <div id="fsbRows"></div>
+  </div>
+
+  <div id="ammoBox" class="panel"><div id="ammoCount" class="mono">24<span class="max">/24</span></div><div id="reloadTag">&nbsp;</div></div>
+
+  <div id="abilityBar">
+    <div id="ab-dash" class="ability panel"><div class="ability-fill" style="height:0%"></div><div class="key">E</div><div class="ability-icon">&#8677;</div><div class="cd-num"></div></div>
+    <div id="ab-nova" class="ability panel"><div class="ability-fill" style="height:0%"></div><div class="key">Q</div><div class="ability-icon">&#9889;</div><div class="cd-num"></div></div>
+    <div id="ab-surge" class="ability panel"><div class="ability-fill" style="height:0%"></div><div class="key">F</div><div class="ability-icon">&#10010;</div><div class="cd-num"></div></div>
+  </div>
+
+  <div id="crosshair"><i class="h"></i><i class="h2"></i><i class="v"></i><i class="v2"></i></div>
+  <div id="crosshair-dot"></div>
+  <div id="dmgVignette"></div>
+  <div id="speedlines"></div>
+  <div id="flightTag" class="panel"><span class="sb-label">Airborne Overdrive</span><span class="sb-num mono" id="sbNum">0.0s</span></div>
+  <div id="ultBar" class="panel"><span class="ult-label">R &#8226; Overdrive</span><div class="ult-track"><div class="ult-fill" id="ultFill"></div></div></div>
+
+  <div id="objectiveBar" class="hidden">
+    <div class="obj-top"><span id="objStatus">HOLD THE POINT</span><span class="mono" id="objTimer">4:00</span></div>
+    <div class="obj-track"><div class="obj-fill" id="objFill"></div></div>
+  </div>
+
+  <div id="mpTag" class="readout hidden">MULTIPLAYER: <span id="mpCount">0</span> CONNECTED</div>
+  <div id="pvpWaitTag" class="hidden mono">WAITING FOR OPPONENTS TO JOIN THE ARENA…</div>
+
+  <div id="mobileControls" class="hidden">
+    <div id="joyMove" class="joystick"><div class="joyKnob"></div></div>
+    <div id="joyLook" class="joystick"><div class="joyKnob"></div></div>
+    <button type="button" id="btnJump" class="mbtn">JUMP</button>
+    <button type="button" id="btnReload" class="mbtn">RELD</button>
+    <button type="button" id="btnUlt" class="mbtn mbtn-ult">ULT</button>
+    <button type="button" id="btnFire" class="mbtn mbtn-fire">FIRE</button>
+  </div>
+</div>
+
+<div id="rotatePrompt" class="hidden">
+  <div class="rotate-icon">&#8635;</div>
+  <p>ROTATE YOUR DEVICE<br><span>MERC PROTOCOL PLAYS IN LANDSCAPE</span></p>
+</div>
+
+<div id="matchEndScreen" class="overlay hidden">
+  <div class="stack">
+    <h1 class="title" id="matchEndTitle" style="font-size:40px;">OBJECTIVE SECURED</h1>
+    <p class="lede" id="matchEndLede">You held the point to full capture.</p>
+    <button class="btn" id="rematchBtn">REDEPLOY</button>
+  </div>
+</div>
+
+<div id="loginScreen" class="overlay hidden">
+  <div class="stack">
+    <p class="eyebrow">Ecorp Personnel File</p>
+    <h1 class="title">MERC <span>PROTOCOL</span></h1>
+    <p class="lede" id="loginLede">Sign in with your operator account to deploy. New here? Switch to Register below.</p>
+    <div id="authTabs" style="display:flex; gap:10px;">
+      <button type="button" class="level-opt active" data-authtab="login">SIGN IN</button>
+      <button type="button" class="level-opt" data-authtab="register">REGISTER</button>
+    </div>
+    <input type="text" id="authUsername" class="login-input" maxlength="16" placeholder="USERNAME" autocomplete="username" spellcheck="false">
+    <input type="password" id="authPassword" class="login-input" maxlength="64" placeholder="PASSWORD" autocomplete="current-password">
+    <div id="loginError" class="hero-blurb" style="color:var(--danger); min-height:14px;"></div>
+    <button class="btn" id="loginBtn">SIGN IN</button>
+  </div>
+</div>
+
+<div id="menu" class="overlay hidden">
+  <div class="stack">
+    <p class="eyebrow">Solo Contract // Rooftop District 9</p>
+    <h1 class="title">MERC <span>PROTOCOL</span></h1>
+    <div class="profile-bar">
+      <span>OPERATOR: <b id="profileCallsign">—</b></span>
+      <span id="profileStats">0W / 0L / 0 KILLS</span>
+      <span class="online-dot" id="onlineCountMenu">&#9679; 0 ONLINE</span>
+      <button type="button" class="switch-link" id="switchCallsignBtn">SIGN OUT</button>
+    </div>
+    <p class="lede">Wetware-linked exosuit online. Hold the roof, chain your kills, and burn your Overcharge when it counts.</p>
+    <div id="arenaSelect">
+      <button type="button" class="level-opt active" data-arena="pve"><span class="lv-tag">SOLO</span>PRACTICE — VS BOTS</button>
+      <button type="button" class="level-opt" data-arena="pvp"><span class="lv-tag">LIVE</span>MULTIPLAYER ARENA — PVP</button>
+    </div>
+    <p class="hero-blurb mono" id="arenaBlurb">Bots fill every open seat on both squads — good for warming up or playing solo.</p>
+    <div id="heroSelect">
+      <button type="button" class="level-opt active" data-hero="vanguard"><span class="lv-tag">ASSAULT</span>VANGUARD</button>
+      <button type="button" class="level-opt" data-hero="jugger"><span class="lv-tag">TANK</span>JUGGER</button>
+      <button type="button" class="level-opt" data-hero="phantom"><span class="lv-tag">RECON</span>PHANTOM</button>
+    </div>
+    <p class="hero-blurb mono" id="heroBlurb">Balanced loadout. Reliable dash, wide nova burst, solid sustain.</p>
+    <div id="modeSelect">
+      <button type="button" class="level-opt active" data-mode="tdm"><span class="lv-tag">3v3</span>TEAM DEATHMATCH</button>
+      <button type="button" class="level-opt" data-mode="objective"><span class="lv-tag">3v3</span>CAPTURE OBJECTIVE</button>
+    </div>
+    <div id="levelSelect">
+      <button type="button" class="level-opt active" data-level="rooftop"><span class="lv-tag">SITE 01</span>ROOFTOP</button>
+      <button type="button" class="level-opt" data-level="facility"><span class="lv-tag">SITE 02</span>THE VAULT</button>
+      <button type="button" class="level-opt" data-level="undergrid"><span class="lv-tag">SITE 03</span>UNDERGRID</button>
+    </div>
+    <button class="btn" id="deployBtn">DEPLOY</button>
+    <div class="controls-grid">
+      <div class="row"><span class="key">W A S D</span> Move</div>
+      <div class="row"><span class="key">MOUSE</span> Turn / Aim</div>
+      <div class="row"><span class="key">SHIFT</span> Sprint</div>
+      <div class="row"><span class="key">LMB</span> Fire</div>
+      <div class="row"><span class="key">V</span> Reload</div>
+      <div class="row"><span class="key">SPACE</span> Jump</div>
+      <div class="row"><span class="key">Q</span> Nova</div>
+      <div class="row"><span class="key">E</span> Dash</div>
+      <div class="row"><span class="key">F</span> Surge</div>
+      <div class="row"><span class="key">P</span> POV Toggle</div>
+      <div class="row"><span class="key">R</span> Overdrive (Ult)</div>
+      <div class="row"><span class="key">ESC</span> Pause</div>
+    </div>
+  </div>
+</div>
+
+<div id="pauseScreen" class="overlay hidden">
+  <div class="stack">
+    <h1 class="title" style="font-size:40px;">PAUSED</h1>
+    <div id="settingsPanel">
+      <div class="setting-row">
+        <label for="sensSlider">SENSITIVITY</label>
+        <input type="range" id="sensSlider" min="8" max="60" step="1">
+        <span class="mono setting-val" id="sensVal"></span>
+      </div>
+      <div class="setting-row">
+        <label for="fovSlider">FIELD OF VIEW</label>
+        <input type="range" id="fovSlider" min="50" max="90" step="1">
+        <span class="mono setting-val" id="fovVal"></span>
+      </div>
+    </div>
+    <button class="btn" id="resumeBtn">RESUME</button>
+  </div>
+</div>
+
+<div id="deathScreen" class="overlay hidden">
+  <div class="stack"><div id="deathTitle">DOWNED</div><div id="respawnTimer">REDEPLOYING IN 3…</div></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/environments/RoomEnvironment.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ========================================================================
+     MERC PROTOCOL — third-person cyberpunk-mercenary combat prototype
+     ======================================================================== */
+
+  var loadingEl = document.getElementById('loading');
+  var loadbarFill = document.getElementById('loadbarFill');
+  function setLoad(pct){ loadbarFill.style.width = pct + '%'; }
+  function ready(){ loadingEl.classList.add('hidden'); }
+
+  // one-shot "system boot" glitch flicker on the menu title -- plays once over
+  // ~0.6s then settles to a static, legible title. No continuous strobe/loop.
+  (function bootTitle(){
+    var t = document.querySelector('.title');
+    if (!t) return;
+    t.classList.add('boot');
+    setTimeout(function(){ t.classList.remove('boot'); }, 650);
+  })();
+
+  // ---------------------------------------------------------------- renderer
+  var canvas = document.getElementById('gameCanvas');
+  // antialias is off on the context itself: the composer/bloom path (our primary
+  // render path below) draws into its own non-multisampled render target, so a
+  // multisampled context buys nothing there and only adds framebuffer cost
+  var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: false, powerPreference:'high-performance' });
+  // capped lower than before -- real-time shadow maps were the single biggest cost
+  // in the old build (six skinned characters + cover all casting/receiving PCF
+  // soft shadows every frame); dropping them for lightweight blob shadows plus a
+  // tighter pixel-ratio cap is what actually buys back the frame time
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 0.82;
+  renderer.shadowMap.enabled = false;
+
+  var scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x170308, 0.0058); // thicker, darker haze -- smoke machine, not daylight
+
+  var camera = new THREE.PerspectiveCamera(58, window.innerWidth/window.innerHeight, 0.05, 400);
+  var BASE_FOV = 58, SPRINT_FOV = 68;
+  var DEFAULT_FOV = 58, DEFAULT_SPRINT_FOV = 68;
+  var SETTINGS = { sens: 0.0024 };
+  scene.add(camera); // lets us hang a first-person viewmodel gun off the camera itself
+
+  // settings panel (mouse sensitivity + FOV), reachable from the pause screen.
+  // Sensitivity slider maps its 8-60 integer range onto SETTINGS.sens at
+  // roughly 1/25000 per step; FOV slider drives BASE_FOV directly and rescales
+  // SPRINT_FOV by the same ratio so the sprint FOV "pop" stays proportional.
+  (function initSettingsPanel(){
+    var sensSlider = document.getElementById('sensSlider');
+    var fovSlider = document.getElementById('fovSlider');
+    var sensVal = document.getElementById('sensVal');
+    var fovVal = document.getElementById('fovVal');
+    if (!sensSlider || !fovSlider) return;
+    sensSlider.value = Math.round(SETTINGS.sens*10000);
+    fovSlider.value = DEFAULT_FOV;
+    sensVal.textContent = sensSlider.value;
+    fovVal.textContent = fovSlider.value + '°';
+    sensSlider.addEventListener('input', function(){
+      SETTINGS.sens = Number(sensSlider.value)/10000;
+      sensVal.textContent = sensSlider.value;
+    });
+    fovSlider.addEventListener('input', function(){
+      var newFov = Number(fovSlider.value);
+      var ratio = newFov/DEFAULT_FOV;
+      BASE_FOV = newFov;
+      SPRINT_FOV = Math.round(DEFAULT_SPRINT_FOV*ratio);
+      camera.fov = BASE_FOV;
+      camera.updateProjectionMatrix();
+      fovVal.textContent = fovSlider.value + '°';
+    });
+  })();
+
+  // a dim custom environment for subtle metal/wet-asphalt reflections
+  // (three's default RoomEnvironment is studio-bright and blows out on our dark night scene)
+  var pmrem = new THREE.PMREMGenerator(renderer);
+  var dimRoom = new THREE.RoomEnvironment();
+  dimRoom.traverse(function(o){ if (o.isMesh && o.material && o.material.color) { o.material = o.material.clone(); o.material.color.multiplyScalar(0.05); } });
+  var envTex = pmrem.fromScene(dimRoom, 0.04).texture;
+  scene.environment = envTex;
+
+  // ---------------------------------------------------------------- bloom
+  var composer = null, bloom = null;
+  try {
+    composer = new THREE.EffectComposer(renderer);
+    composer.addPass(new THREE.RenderPass(scene, camera));
+    // bloom sampled at half resolution -- it's a soft blur pass, the quality loss
+    // is invisible but it roughly quarters that pass's pixel-shader cost
+    bloom = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth*0.5, window.innerHeight*0.5), 0.32, 0.55, 0.9);
+    composer.addPass(bloom);
+  } catch(e){ composer = null; }
+
+  window.addEventListener('resize', function(){
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    if (composer) composer.setSize(window.innerWidth, window.innerHeight);
+    if (bloom) bloom.resolution.set(window.innerWidth*0.5, window.innerHeight*0.5);
+  });
+
+  // ---------------------------------------------------------------- lighting
+  // rave-club rig: a near-black room with a cold white key (moonlight through
+  // the smoke) and a bank of red/white strobes doing the actual work -- no more
+  // bright daylight sky, this reads as a warehouse show at 1am
+  scene.add(new THREE.HemisphereLight(0x2a0a10, 0x0a0407, 0.2));
+  var sun = new THREE.DirectionalLight(0xfff2f2, 0.42);
+  sun.position.set(-30, 42, -18);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -50; sun.shadow.camera.right = 50;
+  sun.shadow.camera.top = 50; sun.shadow.camera.bottom = -50;
+  sun.shadow.camera.far = 130;
+  sun.shadow.bias = -0.0015;
+  scene.add(sun);
+  var moon = sun; // kept for backward-compat references below
+
+  var rimFill = new THREE.DirectionalLight(0xff1b34, 0.35);
+  rimFill.position.set(24, 18, 22);
+  scene.add(rimFill);
+
+  // fixed accent spotlights -- static intensities, no beat-driven flicker/strobe.
+  // A very subtle slow breathing (low amplitude, low frequency) is applied in the
+  // main loop for atmosphere, well short of anything that reads as strobing.
+  var cyanSpot = new THREE.PointLight(0xffffff, 1.7, 40, 2);
+  cyanSpot.position.set(-14, 6, -10);
+  scene.add(cyanSpot);
+  var amberSpot = new THREE.PointLight(0xff1b34, 1.5, 34, 2);
+  amberSpot.position.set(15, 5, 12);
+  scene.add(amberSpot);
+  var dangerSpot = new THREE.PointLight(0xff1b34, 0.9, 30, 2);
+  dangerSpot.position.set(0, 5, -18);
+  scene.add(dangerSpot);
+
+  // ---------------------------------------------------------------- sky
+  // black void above the skyline with a faint red glow on the horizon, like
+  // light bleeding out of a club roof -- no daytime blue left anywhere
+  (function buildSky(){
+    var geo = new THREE.SphereGeometry(250, 24, 24);
+    var mat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      uniforms: { top:{value:new THREE.Color(0x030103)}, bottom:{value:new THREE.Color(0x2a0509)}, mid:{value:new THREE.Color(0x0c0306)} },
+      vertexShader: "varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }",
+      fragmentShader: "varying vec3 vPos; uniform vec3 top; uniform vec3 bottom; uniform vec3 mid; \
+        void main(){ float h = normalize(vPos).y; \
+          vec3 col = h > 0.0 ? mix(mid, top, smoothstep(0.0,0.85,h)) : mix(mid, bottom, smoothstep(0.0,-0.25,h)); \
+          gl_FragColor = vec4(col,1.0); }"
+    });
+    scene.add(new THREE.Mesh(geo, mat));
+  })();
+
+  // ---------------------------------------------------------------- procedural grime texture helper
+  function noiseCanvas(w,h,base,variance,alphaBase){
+    var c = document.createElement('canvas'); c.width=w; c.height=h;
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = base; ctx.fillRect(0,0,w,h);
+    for (var i=0;i<w*h*0.06;i++){
+      var x=Math.random()*w, y=Math.random()*h, r=Math.random()*2+0.3;
+      ctx.fillStyle = 'rgba(0,0,0,'+(Math.random()*0.25).toFixed(2)+')';
+      ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill();
+    }
+    return c;
+  }
+
+  function skylineTexture(w,h){
+    var c = document.createElement('canvas'); c.width=w; c.height=h;
+    var ctx = c.getContext('2d');
+    var grad = ctx.createLinearGradient(0,0,0,h);
+    grad.addColorStop(0,'#050206'); grad.addColorStop(0.6,'#0d0308'); grad.addColorStop(1,'#2a070c');
+    ctx.fillStyle = grad; ctx.fillRect(0,0,w,h);
+    var x=0;
+    while (x < w){
+      var bw = 40 + Math.random()*90;
+      var bh = 120 + Math.random()*(h-160);
+      ctx.fillStyle = 'rgba(10,4,7,0.92)';
+      ctx.fillRect(x, h-bh, bw, bh);
+      for (var wy = h-bh+14; wy < h-10; wy += 16){
+        for (var wx = x+6; wx < x+bw-6; wx += 12){
+          if (Math.random() < 0.35){
+            ctx.fillStyle = Math.random()<0.35 ? 'rgba(255,23,52,0.95)' : 'rgba(245,240,242,0.85)';
+            ctx.fillRect(wx, wy, 5, 7);
+          }
+        }
+      }
+      x += bw + 4 + Math.random()*10;
+    }
+    return c;
+  }
+
+  function neonSignTexture(text, color){
+    var c = document.createElement('canvas'); c.width=512; c.height=128;
+    var ctx = c.getContext('2d');
+    ctx.clearRect(0,0,512,128);
+    ctx.font = '800 64px Orbitron, sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.shadowColor = color; ctx.shadowBlur = 30;
+    ctx.fillStyle = color;
+    ctx.fillText(text, 256, 64);
+    ctx.shadowBlur = 10;
+    ctx.fillText(text, 256, 64);
+    return c;
+  }
+
+  // ---------------------------------------------------------------- wall decal textures
+  // a small reusable pool of pre-baked technical/hazard decal textures (waypoint
+  // tags, barcodes, warning stamps, tick rulers) drawn once via Canvas 2D, the
+  // same technique as radialGradientCanvas() below -- never generated per-instance
+  // or per-frame, just picked from this pool and stamped on thin planes in front
+  // of wall geometry.
+  function cornerBrackets(ctx, x, y, w, h, len, color, lw){
+    ctx.strokeStyle = color; ctx.lineWidth = lw || 5; ctx.lineCap = 'butt';
+    function L(px, py, dx, dy){
+      ctx.beginPath();
+      ctx.moveTo(px, py + len*dy);
+      ctx.lineTo(px, py);
+      ctx.lineTo(px + len*dx, py);
+      ctx.stroke();
+    }
+    L(x, y, 1, 1); L(x+w, y, -1, 1); L(x, y+h, 1, -1); L(x+w, y+h, -1, -1);
+  }
+  function roundRectStroke(ctx, x, y, w, h, r){
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.arcTo(x+w, y, x+w, y+h, r);
+    ctx.arcTo(x+w, y+h, x, y+h, r);
+    ctx.arcTo(x, y+h, x, y, r);
+    ctx.arcTo(x, y, x+w, y, r);
+    ctx.closePath();
+    ctx.stroke();
+  }
+  function drawWaypointTag(ctx, w, h, label, sub){
+    var pad = 46;
+    cornerBrackets(ctx, pad, pad, w-2*pad, h-2*pad, 34, 'rgba(255,255,255,0.85)', 5);
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2;
+    roundRectStroke(ctx, pad+18, pad+18, w-2*pad-36, h-2*pad-36, 14);
+    ctx.font = '700 46px "Share Tech Mono", monospace';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, w/2, h/2 - 10);
+    ctx.font = '400 20px "Share Tech Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText(sub || ('8' + (100+Math.floor(Math.random()*899)) + '-' + (10+Math.floor(Math.random()*89)) + '/A/'), w/2, h/2 + 44);
+    // small dotted guide line down one side
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+    ctx.setLineDash([4,8]);
+    ctx.beginPath(); ctx.moveTo(pad*0.6, pad); ctx.lineTo(pad*0.6, h-pad); ctx.stroke();
+    ctx.setLineDash([]);
+    // tiny caution hex badge, top-right
+    var hx = w-pad*0.65, hy = pad*0.85, hr = 20;
+    ctx.strokeStyle = 'rgba(255,27,52,0.85)'; ctx.lineWidth = 3;
+    ctx.beginPath();
+    for (var i=0;i<6;i++){ var a=i*Math.PI/3 - Math.PI/2; var px=hx+Math.cos(a)*hr, py=hy+Math.sin(a)*hr; i===0?ctx.moveTo(px,py):ctx.lineTo(px,py); }
+    ctx.closePath(); ctx.stroke();
+    ctx.font = '700 16px "Share Tech Mono", monospace'; ctx.fillStyle = 'rgba(255,27,52,0.9)';
+    ctx.fillText('!', hx, hy+1);
+  }
+  function drawBarcode(ctx, w, h){
+    var x = w*0.28;
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    while (x < w*0.72){
+      var bw = 3 + Math.random()*10;
+      if (Math.random() < 0.72) ctx.fillRect(x, h*0.12, bw, h*0.68);
+      x += bw + 3 + Math.random()*7;
+    }
+    ctx.font = '400 22px "Share Tech Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.textAlign = 'center';
+    ctx.fillText((8000+Math.floor(Math.random()*1999)) + '-' + (10+Math.floor(Math.random()*89)) + '-' + (10000+Math.floor(Math.random()*89999)), w/2, h*0.87);
+    cornerBrackets(ctx, w*0.22, h*0.08, w*0.56, h*0.84, 26, 'rgba(255,255,255,0.5)', 3);
+  }
+  function drawWarningStamp(ctx, w, h){
+    ctx.save();
+    ctx.translate(w/2, h/2);
+    ctx.rotate(-0.35);
+    ctx.fillStyle = 'rgba(255,27,52,0.16)';
+    ctx.fillRect(-w*0.62, -h*0.14, w*1.24, h*0.28);
+    ctx.strokeStyle = 'rgba(255,27,52,0.9)'; ctx.lineWidth = 5;
+    ctx.strokeRect(-w*0.62, -h*0.14, w*1.24, h*0.28);
+    ctx.font = '900 74px Orbitron, sans-serif';
+    ctx.fillStyle = 'rgba(255,27,52,0.92)';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('WARNING', 0, 4);
+    ctx.restore();
+    ctx.font = '700 22px "Share Tech Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.textAlign = 'left';
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2;
+    ctx.strokeRect(w*0.08, h*0.78, 118, 46);
+    ctx.fillText((70+Math.floor(Math.random()*29)) + '%', w*0.08+14, h*0.78+30);
+    cornerBrackets(ctx, w*0.08, h*0.08, w*0.84, h*0.84, 30, 'rgba(255,255,255,0.5)', 3);
+  }
+  function drawTickRuler(ctx, w, h){
+    cornerBrackets(ctx, w*0.1, h*0.1, w*0.8, h*0.8, 32, 'rgba(255,255,255,0.6)', 4);
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 3;
+    var ry = h*0.5;
+    ctx.beginPath(); ctx.moveTo(w*0.14, ry); ctx.lineTo(w*0.86, ry); ctx.stroke();
+    ctx.font = '400 16px "Share Tech Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.textAlign = 'center';
+    for (var i=0;i<=12;i++){
+      var x = w*0.14 + (w*0.72)*(i/12);
+      var big = i%4===0;
+      ctx.lineWidth = big?3:1.5;
+      ctx.beginPath(); ctx.moveTo(x, ry - (big?26:14)); ctx.lineTo(x, ry + (big?26:14)); ctx.stroke();
+      if (big) ctx.fillText(String(i*8).padStart(2,'0'), x, ry+46);
+    }
+    ctx.font = '700 26px "Share Tech Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText('TRAJECTORY ANALYZING...', w/2, h*0.24);
+  }
+  var DECAL_TAG_NAMES = ['GATE 9','RIFT 04','SECTOR A2','UNIT 12','CAMP 8','A7'];
+  // corp-plate decals: a big bold condensed two-line wordmark (fake faction
+  // name) with a small tag chip in one corner and a fine hairline rule under
+  // it -- the "KIROSHI INDUSTRY" / "MILITECH" plate look from the reference
+  // sheets, built entirely from canvas text/strokes so it costs nothing extra
+  // to bake once into the shared texture pool.
+  var CORP_PLATES = [
+    { name1:'KESSLER', name2:'DYNAMICS', tag:'19-VOLT' },
+    { name1:'ORDNANCE', name2:'GRID', tag:'SECTOR/ARM9' },
+    { name1:'VESTRON', name2:'ARMS', tag:'CRITICAL MASS' }
+  ];
+  function drawCorpPlate(ctx, w, h, plate){
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    // small angled tag chip, top-left
+    ctx.save();
+    ctx.translate(w*0.08, h*0.1);
+    ctx.beginPath();
+    ctx.moveTo(0,0); ctx.lineTo(w*0.34,0); ctx.lineTo(w*0.30,h*0.09); ctx.lineTo(0,h*0.09); ctx.closePath();
+    ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.font = '700 20px Orbitron, sans-serif';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(plate.tag, w*0.02, h*0.045);
+    ctx.restore();
+    ctx.font = '900 62px Orbitron, sans-serif';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(plate.name1, w*0.08, h*0.42);
+    ctx.fillText(plate.name2, w*0.08, h*0.42 + 64);
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(w*0.08, h*0.62); ctx.lineTo(w*0.7, h*0.62); ctx.stroke();
+    cornerBrackets(ctx, w*0.06, h*0.06, w*0.88, h*0.86, 26, 'rgba(255,255,255,0.4)', 3);
+  }
+  // small stacked hex-badge cluster with vertical callsign text -- the tiny
+  // "GATE 9 / VEX.R" hex stamp cluster seen bottom-corner of the plate refs
+  function drawHexBadge(ctx, w, h, code){
+    function hex(cx, cy, r){
+      ctx.beginPath();
+      for (var i=0;i<6;i++){ var a=i*Math.PI/3 - Math.PI/2; var px=cx+Math.cos(a)*r, py=cy+Math.sin(a)*r; i===0?ctx.moveTo(px,py):ctx.lineTo(px,py); }
+      ctx.closePath();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 3;
+    hex(w*0.5, h*0.28, w*0.22); ctx.stroke();
+    hex(w*0.5, h*0.62, w*0.16); ctx.stroke();
+    ctx.font = '700 22px "Share Tech Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(code, w*0.5, h*0.28);
+    ctx.font = '400 15px "Share Tech Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillText('VEX./R', w*0.5, h*0.62);
+    ctx.save();
+    ctx.translate(w*0.5, h*0.86); ctx.rotate(-Math.PI/2);
+    ctx.font = '900 40px Orbitron, sans-serif'; ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fillText('ACCESS', 0, 0);
+    ctx.restore();
+  }
+  // large stencil-cut district name plate -- the bold serif-stencil "PACIFICA"
+  // look, reused as a big single-word signage panel for corridor endcaps
+  var DISTRICT_NAMES = ['PACIFICA', 'KABUKI', 'WESTBROOK'];
+  function drawDistrictStencil(ctx, w, h, name){
+    ctx.font = '900 84px Georgia, serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.save();
+    ctx.translate(w/2, h/2);
+    ctx.scale(1, 1.15);
+    ctx.fillText(name, 0, 0);
+    // stencil breaks: a few thin black gaps cut across the letters
+    ctx.fillStyle = '#000';
+    for (var i=0;i<3;i++){
+      var gy = -h*0.12 + i*(h*0.12);
+      ctx.fillRect(-w*0.46, gy, w*0.92, 3);
+    }
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+    ctx.strokeRect(w*0.06, h*0.28, w*0.88, h*0.44);
+  }
+  // bright neon ad-panel look for the Undergrid market level -- a saturated
+  // cyan/magenta gradient plate with a bold product wordmark and a vertical
+  // katakana-style accent strip, meant to glow rather than read as grimy
+  // signage like the other decals
+  var HOLO_ADS = [
+    { word:'KIRIN-7', sub:'NET ACCESS // LVL 3', glow:'#35e8ff' },
+    { word:'REDLINE', sub:'STIM DISPENSARY', glow:'#ff35c4' },
+    { word:'ORBITAL', sub:'DATA MARKET', glow:'#35ffb0' }
+  ];
+  function drawHoloAd(ctx, w, h, ad){
+    var grad = ctx.createLinearGradient(0,0,0,h);
+    grad.addColorStop(0, ad.glow); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = 0.14;
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,w,h);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = ad.glow; ctx.lineWidth = 4;
+    ctx.strokeRect(w*0.05, h*0.08, w*0.9, h*0.84);
+    ctx.fillStyle = ad.glow;
+    ctx.font = '900 58px Orbitron, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = ad.glow; ctx.shadowBlur = 22;
+    ctx.fillText(ad.word, w*0.5, h*0.42);
+    ctx.shadowBlur = 0;
+    ctx.font = '400 17px "Share Tech Mono", monospace';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText(ad.sub, w*0.5, h*0.58);
+    cornerBrackets(ctx, w*0.08, h*0.12, w*0.84, h*0.76, 20, ad.glow, 2.5);
+  }
+  function buildDecalTexturePool(){
+    var variants = [0,1,2,3,4,5,6,7,8,9,10,11,12,13];
+    return variants.map(function(v){
+      var w = 512, h = (v===1) ? 1024 : (v===9 ? 1024 : 512);
+      var c = document.createElement('canvas'); c.width = w; c.height = h;
+      var ctx = c.getContext('2d');
+      ctx.clearRect(0,0,w,h);
+      if (v===0) drawWaypointTag(ctx, w, h, DECAL_TAG_NAMES[0]);
+      else if (v===1) drawBarcode(ctx, w, h);
+      else if (v===2) drawWarningStamp(ctx, w, h);
+      else if (v===3) drawTickRuler(ctx, w, h);
+      else if (v===4) drawWaypointTag(ctx, w, h, DECAL_TAG_NAMES[4]);
+      else if (v===5) drawWaypointTag(ctx, w, h, DECAL_TAG_NAMES[3], 'STATUS: STASIS');
+      else if (v===6) drawCorpPlate(ctx, w, h, CORP_PLATES[0]);
+      else if (v===7) drawCorpPlate(ctx, w, h, CORP_PLATES[1]);
+      else if (v===8) drawHexBadge(ctx, w, h, 'GATE 9');
+      else if (v===9) drawDistrictStencil(ctx, w, h, DISTRICT_NAMES[0]);
+      else if (v===11) drawHoloAd(ctx, w, h, HOLO_ADS[0]);
+      else if (v===12) drawHoloAd(ctx, w, h, HOLO_ADS[1]);
+      else if (v===13) drawHoloAd(ctx, w, h, HOLO_ADS[2]);
+      else drawCorpPlate(ctx, w, h, CORP_PLATES[2]);
+      var tex = new THREE.CanvasTexture(c);
+      tex.aspect = w/h; // plain custom prop -- THREE.Texture has no userData in this build
+      return tex;
+    });
+  }
+  var decalTexPool = buildDecalTexturePool();
+
+  // attaches one randomly-picked decal from the pool to a thin plane offset just
+  // in front of a wall face -- cheap (reused textures, no new canvas work) and
+  // avoids needing real projected DecalGeometry
+  function scatterWallDecal(group, colliderArr, x, y, z, rotY, maxW){
+    var tex = decalTexPool[Math.floor(Math.random()*decalTexPool.length)];
+    var decalW = Math.min(maxW, 1.7);
+    var decalH = decalW / (tex.aspect || 1);
+    var mat = new THREE.MeshBasicMaterial({ map:tex, transparent:true, depthWrite:false, fog:false, side:THREE.DoubleSide });
+    var plane = new THREE.Mesh(new THREE.PlaneGeometry(decalW, decalH), mat);
+    plane.position.set(x, y, z);
+    plane.rotation.y = rotY;
+    group.add(plane);
+  }
+
+  // ---------------------------------------------------------------- arena
+  var ARENA_HALF = 34;
+  // `colliders` is the ACTIVE level's collision list (swapped on level select,
+  // see applyLevelSelection below); each level keeps its own array so switching
+  // levels never mixes their geometry
+  var rooftopColliders = [];
+  var facilityColliders = [];
+  var undergridColliders = [];
+  var colliders = rooftopColliders;
+  var rooftopGroup = new THREE.Group();
+  scene.add(rooftopGroup);
+  var facilityGroup = new THREE.Group();
+  facilityGroup.visible = false;
+  scene.add(facilityGroup);
+  var undergridGroup = new THREE.Group();
+  undergridGroup.visible = false;
+  scene.add(undergridGroup);
+  var currentLevel = 'rooftop'; // 'rooftop' | 'facility' -- set from the menu toggle before deploy
+
+  // hero loadouts: three distinct kits sharing the same Dash/Nova/Surge slots
+  // but tuned to feel different -- a balanced default, a slow tank with big
+  // sustain, and a fast glass cannon with cheap cooldowns. `currentHero` is
+  // set by the menu toggle (mirrors currentLevel) and applied once at deploy
+  // by applyHeroSelection().
+  var HEROES = {
+    vanguard: { name:'VANGUARD', maxHp:100, baseSpeed:5.6, tint:0xf5f0f2,
+      dashCd:6, dashDist:7, dashDmg:25,
+      novaCd:12, novaRadius:12, novaDmg:55,
+      surgeCd:16, surgeHeal:38,
+      blurb:'Balanced loadout. Reliable dash, wide nova burst, solid sustain.' },
+    jugger: { name:'JUGGER', maxHp:150, baseSpeed:4.8, tint:0xffb020,
+      dashCd:7.5, dashDist:5, dashDmg:35,
+      novaCd:10, novaRadius:9, novaDmg:70,
+      surgeCd:13, surgeHeal:55,
+      blurb:'Heavy exosuit. Slower and harder to miss, but shrugs off far more damage and heals big off Surge.' },
+    phantom: { name:'PHANTOM', maxHp:75, baseSpeed:6.6, tint:0x63e8ff,
+      dashCd:4, dashDist:9, dashDmg:18,
+      novaCd:9, novaRadius:14, novaDmg:40,
+      surgeCd:11, surgeHeal:26,
+      blurb:'Lightweight recon frame. Fragile, but out-runs and out-dashes everything else on the roof.' }
+  };
+  var currentHero = 'vanguard';
+
+  (function buildArena(){
+    var grimeTex = new THREE.CanvasTexture(noiseCanvas(512,512,'#ffffff',0.15));
+    grimeTex.wrapS = grimeTex.wrapT = THREE.RepeatWrapping;
+    grimeTex.repeat.set(10,10);
+
+    var floorMat = new THREE.MeshStandardMaterial({ color:0x1a1418, roughness:0.48, metalness:0.2, map:grimeTex, envMapIntensity:0.45 });
+    var floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA_HALF*2, ARENA_HALF*2), floorMat);
+    floor.rotation.x = -Math.PI/2;
+    floor.receiveShadow = true;
+    rooftopGroup.add(floor);
+
+    var laneMat = new THREE.MeshBasicMaterial({ color:0xff1b34, transparent:true, opacity:0.28 });
+    var lane = new THREE.Mesh(new THREE.RingGeometry(ARENA_HALF*0.985, ARENA_HALF, 64), laneMat);
+    lane.rotation.x = -Math.PI/2; lane.position.y = 0.02;
+    rooftopGroup.add(lane);
+
+    // boundary walls: concrete parapet
+    var wallH = 2.6, wallT = 1.1;
+    var wallMat = new THREE.MeshStandardMaterial({ color:0x211619, roughness:0.75, metalness:0.15, map:grimeTex });
+    var edgeMat = new THREE.MeshBasicMaterial({ color:0xffffff });
+    function wall(w,d,x,z){
+      var m = new THREE.Mesh(new THREE.BoxGeometry(w, wallH, d), wallMat);
+      m.position.set(x, wallH/2, z);
+      m.castShadow = true; m.receiveShadow = true;
+      rooftopGroup.add(m);
+      var edge = new THREE.Mesh(new THREE.BoxGeometry(Math.min(w,d)>d?w+0.05:0.08, 0.06, d>w?d+0.05:0.08), edgeMat);
+      edge.position.set(x, wallH+0.04, z);
+      rooftopGroup.add(edge);
+      rooftopColliders.push(new THREE.Box3().setFromObject(m));
+    }
+    var L = ARENA_HALF;
+    wall(L*2+wallT, wallT, 0, -L-wallT/2);
+    wall(L*2+wallT, wallT, 0, L+wallT/2);
+    wall(wallT, L*2+wallT, -L-wallT/2, 0);
+    wall(wallT, L*2+wallT, L+wallT/2, 0);
+    // a few technical decal tags scattered along the inner face of the boundary
+    // parapet, reusing the shared decal texture pool
+    scatterWallDecal(rooftopGroup, rooftopColliders, -20, 1.3, -L-wallT/2+0.62, 0, 1.9);
+    scatterWallDecal(rooftopGroup, rooftopColliders, 10, 1.3, -L-wallT/2+0.62, 0, 1.9);
+    scatterWallDecal(rooftopGroup, rooftopColliders, -L-wallT/2+0.62, 1.3, 6, Math.PI/2, 1.9);
+    scatterWallDecal(rooftopGroup, rooftopColliders, -L-wallT/2+0.62, 1.3, -14, Math.PI/2, 1.9);
+    scatterWallDecal(rooftopGroup, rooftopColliders, L+wallT/2-0.62, 1.3, -4, -Math.PI/2, 1.9);
+    scatterWallDecal(rooftopGroup, rooftopColliders, L+wallT/2-0.62, 1.3, 12, -Math.PI/2, 1.9);
+
+    // distant skyline ring
+    var skyTex = new THREE.CanvasTexture(skylineTexture(2048,512));
+    skyTex.wrapS = THREE.RepeatWrapping;
+    var skylineMat = new THREE.MeshBasicMaterial({ map: skyTex, transparent:true, fog:false });
+    var ringR = ARENA_HALF*1.55;
+    var sides = 8;
+    for (var i=0;i<sides;i++){
+      var a = (i/sides)*Math.PI*2;
+      var seg = new THREE.Mesh(new THREE.PlaneGeometry(ringR*0.95, 46), skylineMat);
+      seg.position.set(Math.sin(a)*ringR, 20, Math.cos(a)*ringR);
+      seg.rotation.y = a + Math.PI;
+      rooftopGroup.add(seg);
+    }
+
+    // cover: shipping containers + concrete barriers
+    var containerMat1 = new THREE.MeshStandardMaterial({ color:0x2a0a0d, roughness:0.6, metalness:0.4, map:grimeTex });
+    var containerMat2 = new THREE.MeshStandardMaterial({ color:0x161013, roughness:0.6, metalness:0.4, map:grimeTex });
+    var barrierMat = new THREE.MeshStandardMaterial({ color:0x2a2226, roughness:0.75, metalness:0.15, map:grimeTex });
+
+    var containerSpots = [
+      { p:[-14,-8], r:0.5, mat:containerMat1 }, { p:[13,9], r:1.9, mat:containerMat2 },
+      { p:[-15,10], r:-0.3, mat:containerMat2 }, { p:[15,-11], r:1.1, mat:containerMat1 }
+    ];
+    containerSpots.forEach(function(s){
+      var m = new THREE.Mesh(new THREE.BoxGeometry(6,2.6,2.4), s.mat);
+      m.position.set(s.p[0], 1.3, s.p[1]);
+      m.rotation.y = s.r;
+      m.castShadow = true; m.receiveShadow = true;
+      rooftopGroup.add(m);
+      rooftopColliders.push(new THREE.Box3().setFromObject(m));
+      // container decal: a technical waypoint/warning tag on its long face
+      var faceOff = new THREE.Vector3(0,0,1.21).applyAxisAngle(new THREE.Vector3(0,1,0), s.r);
+      scatterWallDecal(rooftopGroup, rooftopColliders, s.p[0]+faceOff.x, 1.5, s.p[1]+faceOff.z, s.r, 2.2);
+    });
+
+    var barrierSpots = [[-5,-4,0.4],[5,4,1.2],[0,-16,0],[0,16,0.2],[-20,0,1.57],[20,0,1.57],[8,-8,0.7],[-8,8,2.1]];
+    barrierSpots.forEach(function(s){
+      var m = new THREE.Mesh(new THREE.BoxGeometry(3.4,1.15,0.9), barrierMat);
+      m.position.set(s[0], 0.58, s[1]);
+      m.rotation.y = s[2];
+      m.castShadow = true; m.receiveShadow = true;
+      rooftopGroup.add(m);
+      var stripe = new THREE.Mesh(new THREE.BoxGeometry(3.42,0.14,0.92), new THREE.MeshBasicMaterial({color:0xff1b34}));
+      stripe.position.set(s[0], 1.0, s[1]);
+      stripe.rotation.y = s[2];
+      rooftopGroup.add(stripe);
+      rooftopColliders.push(new THREE.Box3().setFromObject(m));
+    });
+
+    // neon signage (sparing, bold accents)
+    var signs = [
+      { text:'再生', color:'#ffffff', pos:[-ARENA_HALF*0.98, 9, -8], rot: Math.PI/2 },
+      { text:'メルク', color:'#ff1b34', pos:[ARENA_HALF*0.98, 10, 6], rot: -Math.PI/2 },
+      { text:'0917', color:'#ff1b34', pos:[6, 8, -ARENA_HALF*0.98], rot: 0 }
+    ];
+    signs.forEach(function(s){
+      var tex = new THREE.CanvasTexture(neonSignTexture(s.text, s.color));
+      var mat = new THREE.MeshBasicMaterial({ map:tex, transparent:true, fog:false });
+      var plane = new THREE.Mesh(new THREE.PlaneGeometry(5,1.25), mat);
+      plane.position.set(s.pos[0], s.pos[1], s.pos[2]);
+      plane.rotation.y = s.rot;
+      rooftopGroup.add(plane);
+      var pl = new THREE.PointLight(new THREE.Color(s.color).getHex(), 1.4, 12, 2);
+      pl.position.set(s.pos[0], s.pos[1], s.pos[2]);
+      rooftopGroup.add(pl);
+    });
+
+    // volumetric-ish spotlight cones (cheap fake beams, kept subtle so bloom doesn't blow them out)
+    function beam(x,z,color){
+      var geo = new THREE.CylinderGeometry(0.08, 0.9, 13, 16, 1, true);
+      var mat = new THREE.MeshBasicMaterial({ color:color, transparent:true, opacity:0.03, side:THREE.DoubleSide, depthWrite:false, blending:THREE.AdditiveBlending, fog:false });
+      var m = new THREE.Mesh(geo, mat);
+      m.position.set(x, 7, z);
+      rooftopGroup.add(m);
+    }
+    beam(-14,-10,0xffffff);
+    beam(15,10,0xff1b34);
+
+    // ---- central raised platform: a jump-only high-ground vantage point, Overwatch-
+    // style "point" focal piece right in the middle of the arena. Same box-collision
+    // rules as the low cover barriers, just taller -- only the new high jump clears it.
+    (function centralPlatform(){
+      var platMat = new THREE.MeshStandardMaterial({ color:0x201a1d, roughness:0.4, metalness:0.4, map:grimeTex, envMapIntensity:0.9 });
+      var plat = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.4, 1.3, 24), platMat);
+      plat.position.set(0, 0.65, 0);
+      rooftopGroup.add(plat);
+      rooftopColliders.push(new THREE.Box3().setFromObject(plat));
+
+      var rimGeo = new THREE.TorusGeometry(4.2, 0.05, 8, 48);
+      var rim = new THREE.Mesh(rimGeo, new THREE.MeshBasicMaterial({ color:0xffffff }));
+      rim.rotation.x = Math.PI/2; rim.position.y = 1.31;
+      rooftopGroup.add(rim);
+
+      var ptGeo = new THREE.RingGeometry(1.6, 2.0, 40);
+      var ptMat = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.55, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, depthWrite:false, fog:false });
+      var pt = new THREE.Mesh(ptGeo, ptMat);
+      pt.rotation.x = -Math.PI/2; pt.position.y = 1.33;
+      rooftopGroup.add(pt);
+
+      var beaconLight = new THREE.PointLight(0xffffff, 1.1, 10, 2);
+      beaconLight.position.set(0, 2.4, 0);
+      rooftopGroup.add(beaconLight);
+
+      // ground-level capture-radius ring: the platform itself is solid and
+      // unreachable at foot level (see collideAndSlide), so this is the actual
+      // playable boundary of the Control Point -- drawn wide, right at the
+      // radius contest logic checks against, so it visually reads as "stand
+      // in this ring" rather than "stand on the platform."
+      var capRingMat = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.5, side:THREE.DoubleSide, depthWrite:false, fog:false });
+      var capRing = new THREE.Mesh(new THREE.RingGeometry(7.2, 7.5, 56), capRingMat);
+      capRing.rotation.x = -Math.PI/2; capRing.position.y = 0.05;
+      rooftopGroup.add(capRing);
+    })();
+
+    // ---- team spawn zones: mirrored blue / orange floor accents with a holo
+    // beacon pylon, echoing Overwatch's color-coded home bases
+    function spawnZone(z, color){
+      var deckMat = new THREE.MeshBasicMaterial({ color:color, transparent:true, opacity:0.16, blending:THREE.AdditiveBlending, depthWrite:false, fog:false });
+      var deck = new THREE.Mesh(new THREE.CircleGeometry(6.5, 40), deckMat);
+      deck.rotation.x = -Math.PI/2; deck.position.set(0, 0.03, z);
+      rooftopGroup.add(deck);
+      var ringMat = new THREE.MeshBasicMaterial({ color:color, transparent:true, opacity:0.8, side:THREE.DoubleSide, fog:false });
+      var ring = new THREE.Mesh(new THREE.RingGeometry(6.3, 6.5, 48), ringMat);
+      ring.rotation.x = -Math.PI/2; ring.position.set(0, 0.04, z);
+      rooftopGroup.add(ring);
+      var pylon = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.18,3.4,8), new THREE.MeshStandardMaterial({ color:0x22252e, emissive:color, emissiveIntensity:0.7, roughness:0.4, metalness:0.4 }));
+      pylon.position.set(0, 1.7, z + (z>0?-5.4:5.4));
+      rooftopGroup.add(pylon);
+      var pylonLight = new THREE.PointLight(color, 1.2, 9, 2);
+      pylonLight.position.set(0, 3.2, z + (z>0?-5.4:5.4));
+      rooftopGroup.add(pylonLight);
+    }
+    spawnZone(-ARENA_HALF*0.8, 0xf5f0f2);
+    spawnZone(ARENA_HALF*0.8, 0xff1b34);
+
+    // rooftop greebles on the shipping containers -- cheap extra silhouette detail
+    // now that dropping real-time shadows leaves render budget to spend elsewhere
+    var greebleMat = new THREE.MeshStandardMaterial({ color:0x2a2f3a, roughness:0.7, metalness:0.3 });
+    [[-14,2.75,-8.6],[13,2.75,8.4],[-15,2.75,10.6],[15,2.75,-11.4]].forEach(function(p, i){
+      var box = new THREE.Mesh(new THREE.BoxGeometry(0.8+((i%2)*0.3), 0.4, 0.8), greebleMat);
+      box.position.set(p[0], p[1], p[2]);
+      rooftopGroup.add(box);
+    });
+
+    // sunlit dust motes drifting through the air (bright-daylight atmosphere,
+    // not the moody rain this scene used to have)
+    var dustCount = 160;
+    var dp = new Float32Array(dustCount*3);
+    for (var di=0; di<dustCount; di++){
+      dp[di*3] = (Math.random()*2-1)*ARENA_HALF;
+      dp[di*3+1] = Math.random()*10;
+      dp[di*3+2] = (Math.random()*2-1)*ARENA_HALF;
+    }
+    var dustGeo = new THREE.BufferGeometry();
+    dustGeo.setAttribute('position', new THREE.BufferAttribute(dp,3));
+    var dustMat = new THREE.PointsMaterial({ color:0xffe4e8, size:0.06, transparent:true, opacity:0.4, fog:false, blending:THREE.AdditiveBlending, depthWrite:false });
+    var dust = new THREE.Points(dustGeo, dustMat);
+    scene.add(dust); // dust is shared ambient FX across levels, not level-scoped
+    window.__dust = { pts: dust, arr: dp, count: dustCount, seeds: Array.from({length:dustCount}, function(){ return Math.random()*10; }) };
+  })();
+
+  // ---------------------------------------------------------------- facility level
+  // "THE VAULT" -- an interior corporate/industrial facility: a plus-shaped layout
+  // of boxy rooms connected by corridors, built parallel to buildArena() above and
+  // toggled in via the currentLevel selection (see applyLevelSelection). Shares
+  // the outer ARENA_HALF footprint/clamp and the same collideAndSlide/lighting
+  // helpers, but keeps its own geometry + collider list so switching levels never
+  // mixes the two. Corridor walls are the showcase for the wall-decal texture pool.
+  var FACILITY_ROOMS = [
+    { cx:0,   cz:-22, hx:8,  hz:7 },  // north room -- primary bot spawn
+    { cx:0,   cz:0,   hx:7,  hz:7 },  // central hub
+    { cx:-24, cz:0,   hx:6,  hz:7 },  // west wing
+    { cx:24,  cz:0,   hx:6,  hz:7 }   // east wing
+  ];
+  var FACILITY_PLAYER_SPAWN = new THREE.Vector3(0, 0, 22);
+  function randomSpawnFacility(){
+    var r = FACILITY_ROOMS[Math.floor(Math.random()*FACILITY_ROOMS.length)];
+    var x = r.cx + (Math.random()*2-1)*(r.hx-1.2);
+    var z = r.cz + (Math.random()*2-1)*(r.hz-1.2);
+    return new THREE.Vector3(x, 0, z);
+  }
+
+  (function buildFacilityLevel(){
+    var wallH = 3.6, t = 0.6;
+    var facGrime = new THREE.CanvasTexture(noiseCanvas(512,512,'#ffffff',0.12));
+    facGrime.wrapS = facGrime.wrapT = THREE.RepeatWrapping;
+    facGrime.repeat.set(8,8);
+    // fog:false throughout the interior -- the scene's exterior haze (tuned for
+    // the open rooftop) otherwise reads as an indoor smoke/dim-out that fights
+    // the corridor lamps and makes the decals unreadable
+    var floorMat = new THREE.MeshStandardMaterial({ color:0x1c1c20, roughness:0.55, metalness:0.25, map:facGrime, envMapIntensity:0.4, fog:false });
+    var floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA_HALF*2, ARENA_HALF*2), floorMat);
+    floor.rotation.x = -Math.PI/2;
+    floor.receiveShadow = true;
+    facilityGroup.add(floor);
+
+    var wallMat = new THREE.MeshStandardMaterial({ color:0x28212a, roughness:0.68, metalness:0.2, map:facGrime, fog:false });
+    var trimMat = new THREE.MeshBasicMaterial({ color:0xffffff });
+
+    // one wall segment, with an optional decal stamped on a random face
+    function fwall(w, d, x, z){
+      var m = new THREE.Mesh(new THREE.BoxGeometry(w, wallH, d), wallMat);
+      m.position.set(x, wallH/2, z);
+      facilityGroup.add(m);
+      facilityColliders.push(new THREE.Box3().setFromObject(m));
+      var trim = new THREE.Mesh(new THREE.BoxGeometry(w>d?w+0.04:0.05, 0.05, d>w?d+0.04:0.05), trimMat);
+      trim.position.set(x, wallH+0.03, z);
+      facilityGroup.add(trim);
+      if (Math.random() < 0.7){
+        var alongX = w >= d;
+        var side = Math.random() < 0.5 ? 1 : -1;
+        var faceOff = (alongX ? d : w)/2 + 0.03;
+        var along = (alongX ? w : d) - 1.4;
+        var jitter = (Math.random()*2-1) * Math.max(0, along/2);
+        if (alongX){
+          scatterWallDecal(facilityGroup, facilityColliders, x+jitter, 1.5+Math.random()*0.5, z+side*faceOff, side>0?0:Math.PI, Math.min(1.6, w*0.55));
+        } else {
+          scatterWallDecal(facilityGroup, facilityColliders, x+side*faceOff, 1.5+Math.random()*0.5, z+jitter, side>0?Math.PI/2:-Math.PI/2, Math.min(1.6, d*0.55));
+        }
+      }
+    }
+
+    // north room (x -8..8, z -29..-15) -- door gap on south wall for the north corridor
+    fwall(16+t, t, 0, -29-t/2);
+    fwall(5.5, t, -5.25, -15);
+    fwall(5.5, t, 5.25, -15);
+    fwall(t, 14+t, -8-t/2, -22);
+    fwall(t, 14+t, 8+t/2, -22);
+
+    // central hub (x -7..7, z -7..7) -- four door gaps, one per corridor
+    fwall(4.5, t, -4.75, -7); fwall(4.5, t, 4.75, -7);
+    fwall(4.5, t, -4.75, 7);  fwall(4.5, t, 4.75, 7);
+    fwall(t, 4.5, -7, -4.75); fwall(t, 4.5, -7, 4.75);
+    fwall(t, 4.5, 7, -4.75);  fwall(t, 4.5, 7, 4.75);
+
+    // south room (x -8..8, z 15..29) -- player spawn room, door gap on north wall
+    fwall(16+t, t, 0, 29+t/2);
+    fwall(5.5, t, -5.25, 15);
+    fwall(5.5, t, 5.25, 15);
+    fwall(t, 14+t, -8-t/2, 22);
+    fwall(t, 14+t, 8+t/2, 22);
+
+    // west wing (x -30..-18, z -7..7)
+    fwall(t, 14+t, -30-t/2, 0);
+    fwall(t, 4.5, -18-t/2, -4.75);
+    fwall(t, 4.5, -18-t/2, 4.75);
+    fwall(12+t, t, -24, -7-t/2);
+    fwall(12+t, t, -24, 7+t/2);
+
+    // east wing (x 18..30, z -7..7)
+    fwall(t, 14+t, 30+t/2, 0);
+    fwall(t, 4.5, 18+t/2, -4.75);
+    fwall(t, 4.5, 18+t/2, 4.75);
+    fwall(12+t, t, 24, -7-t/2);
+    fwall(12+t, t, 24, 7+t/2);
+
+    // corridor side walls: north<->hub, hub<->south, hub<->west, hub<->east
+    fwall(t, 8+t, -2.5-t/2, -11);
+    fwall(t, 8+t, 2.5+t/2, -11);
+    fwall(t, 8+t, -2.5-t/2, 11);
+    fwall(t, 8+t, 2.5+t/2, 11);
+    fwall(11+t, t, -12.5, -2.5-t/2);
+    fwall(11+t, t, -12.5, 2.5+t/2);
+    fwall(11+t, t, 12.5, -2.5-t/2);
+    fwall(11+t, t, 12.5, 2.5+t/2);
+
+    // cover crates inside the rooms -- reuses the boxy industrial look
+    var crateMat = new THREE.MeshStandardMaterial({ color:0x2a2024, roughness:0.65, metalness:0.3, map:facGrime, fog:false });
+    // kept a clear buffer around both room centers (player/bot spawn points) so
+    // third-person camera collision never clips against cover right at spawn
+    var crateSpots = [[-5,-26,0],[5,-19,0.4],[-22,4.5,0.9],[24,-4.5,-0.6],[5.5,27,1.1],[-5.5,17,0.2]];
+    crateSpots.forEach(function(s){
+      var m = new THREE.Mesh(new THREE.BoxGeometry(2.2,1.2,1.6), crateMat);
+      m.position.set(s[0], 0.6, s[1]);
+      m.rotation.y = s[2];
+      facilityGroup.add(m);
+      facilityColliders.push(new THREE.Box3().setFromObject(m));
+    });
+
+    // sparse warm interior point lights along the corridors + hub so nothing
+    // reads as pitch black (no real shadow occlusion, so a handful of cheap
+    // lights is enough to evenly light the whole passage network)
+    var lampSpots = [[0,-11,0xfff2ee],[0,11,0xfff2ee],[-12.5,0,0xffe9e9],[12.5,0,0xffe9e9],[0,-22,0xffffff],[0,22,0xffffff],[-24,0,0xffdede],[24,0,0xffdede]];
+    lampSpots.forEach(function(s){
+      var pl = new THREE.PointLight(s[2], 1.7, 17, 2);
+      pl.position.set(s[0], 3.0, s[1]);
+      facilityGroup.add(pl);
+    });
+    // a bit of dedicated flat ambient fill so the corridors (lit only by the
+    // sparse lamp spots above) don't crush to black between them -- cheap,
+    // one extra light, scoped to this level's group only
+    var facilityAmbient = new THREE.HemisphereLight(0x554048, 0x0a0608, 0.55);
+    facilityGroup.add(facilityAmbient);
+  })();
+
+  // ================================================================== level 3: THE UNDERGRID
+  // a cyberpunk night-market plaza -- deliberately the opposite palette from
+  // the other two levels (cool cyan/magenta neon instead of warm red/white)
+  // so it reads as a genuinely different place, not a reskin. Flat open
+  // ground (same collision model as the rooftop: box obstacles you can jump
+  // over, no ramps/verticality) ringed with market stalls that break sightlines
+  // and a non-solid glowing plaza medallion at the center -- solid platforms
+  // were a dead end for a "stand near the middle" moment (see the Control
+  // Point comment above), so this one is just a floor decal + light, no collider.
+  var UNDERGRID_PLAYER_SPAWN = new THREE.Vector3(0, 0, 26);
+  function randomSpawnUndergrid(){
+    var a = Math.random()*Math.PI*2;
+    var r = 6 + Math.random()*(ARENA_HALF-10);
+    return new THREE.Vector3(Math.cos(a)*r, 0, Math.sin(a)*r);
+  }
+
+  (function buildUndergridLevel(){
+    var ugGrime = new THREE.CanvasTexture(noiseCanvas(512,512,'#8fe8ff',0.08));
+    ugGrime.wrapS = ugGrime.wrapT = THREE.RepeatWrapping;
+    ugGrime.repeat.set(10,10);
+
+    var floorMat = new THREE.MeshStandardMaterial({ color:0x0a1416, roughness:0.5, metalness:0.35, map:ugGrime, envMapIntensity:0.5 });
+    var floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA_HALF*2, ARENA_HALF*2), floorMat);
+    floor.rotation.x = -Math.PI/2;
+    undergridGroup.add(floor);
+
+    // glowing cyan grid overlay -- a hand-drawn line texture, additive-blended
+    // so it reads as an emissive circuit pattern rather than a flat decal
+    var gridCanvas = document.createElement('canvas'); gridCanvas.width = 256; gridCanvas.height = 256;
+    var gctx = gridCanvas.getContext('2d');
+    gctx.strokeStyle = 'rgba(80,235,255,0.55)'; gctx.lineWidth = 2;
+    gctx.strokeRect(1,1,254,254);
+    gctx.strokeStyle = 'rgba(80,235,255,0.22)'; gctx.lineWidth = 1;
+    gctx.beginPath(); gctx.moveTo(128,0); gctx.lineTo(128,256); gctx.moveTo(0,128); gctx.lineTo(256,128); gctx.stroke();
+    var gridTex = new THREE.CanvasTexture(gridCanvas);
+    gridTex.wrapS = gridTex.wrapT = THREE.RepeatWrapping;
+    gridTex.repeat.set(17,17);
+    var gridMat = new THREE.MeshBasicMaterial({ map:gridTex, transparent:true, opacity:0.5, blending:THREE.AdditiveBlending, depthWrite:false, fog:false });
+    var gridPlane = new THREE.Mesh(new THREE.PlaneGeometry(ARENA_HALF*2, ARENA_HALF*2), gridMat);
+    gridPlane.rotation.x = -Math.PI/2; gridPlane.position.y = 0.02;
+    undergridGroup.add(gridPlane);
+
+    // perimeter wall -- same footprint as the rooftop's, new cool-toned material
+    var L = ARENA_HALF, wallH = 4.6, wallT = 1.0;
+    var wallMat = new THREE.MeshStandardMaterial({ color:0x121a22, roughness:0.6, metalness:0.35, map:ugGrime });
+    [[L*2+wallT, wallT, 0, -L-wallT/2], [L*2+wallT, wallT, 0, L+wallT/2],
+     [wallT, L*2+wallT, -L-wallT/2, 0], [wallT, L*2+wallT, L+wallT/2, 0]].forEach(function(s){
+      var m = new THREE.Mesh(new THREE.BoxGeometry(s[0], wallH, s[1]), wallMat);
+      m.position.set(s[2], wallH/2, s[3]);
+      undergridGroup.add(m);
+      undergridColliders.push(new THREE.Box3().setFromObject(m));
+      var edge = new THREE.Mesh(new THREE.BoxGeometry(s[0]>s[1]?s[0]+0.05:0.08, 0.06, s[1]>s[0]?s[1]+0.05:0.08), new THREE.MeshBasicMaterial({ color:0x51e8ff }));
+      edge.position.set(s[2], wallH+0.04, s[3]);
+      undergridGroup.add(edge);
+    });
+    for (var wi=0; wi<10; wi++){
+      var side = wi % 4;
+      var along = (Math.random()*2-1) * (L-4);
+      var x = side===0?along:(side===1?along:(side===2?-L+wallT/2+0.6:L-wallT/2-0.6));
+      var z = side===0?(-L+wallT/2+0.6):(side===1?(L-wallT/2-0.6):along);
+      var rotY = side===0?0:(side===1?Math.PI:(side===2?Math.PI/2:-Math.PI/2));
+      scatterWallDecal(undergridGroup, undergridColliders, x, 1.4+Math.random()*1.2, z, rotY, 1.9);
+    }
+
+    // market stalls -- broken ring of box cover, each with a random decal and
+    // a small colored canopy so the ring reads as a row of vendor kiosks
+    // rather than generic crates
+    var stallMat = new THREE.MeshStandardMaterial({ color:0x1c2430, roughness:0.55, metalness:0.4, map:ugGrime });
+    var canopyColors = [0x35e8ff, 0xff35c4, 0x35ffb0, 0xffb020];
+    var STALL_COUNT = 12;
+    for (var si=0; si<STALL_COUNT; si++){
+      var a = (si/STALL_COUNT)*Math.PI*2 + (Math.random()*0.3-0.15);
+      var r = 12 + Math.random()*10;
+      var sx = Math.cos(a)*r, sz = Math.sin(a)*r;
+      var sw = 1.8 + Math.random()*0.8, sd = 1.5 + Math.random()*0.6, sh = 1.9 + Math.random()*0.5;
+      var stall = new THREE.Mesh(new THREE.BoxGeometry(sw, sh, sd), stallMat);
+      stall.position.set(sx, sh/2, sz);
+      stall.rotation.y = -a + Math.PI/2;
+      undergridGroup.add(stall);
+      undergridColliders.push(new THREE.Box3().setFromObject(stall));
+      var canopyColor = canopyColors[si % canopyColors.length];
+      var canopy = new THREE.Mesh(new THREE.BoxGeometry(sw+0.3, 0.08, sd+0.3), new THREE.MeshStandardMaterial({ color:0x0c0c10, emissive:canopyColor, emissiveIntensity:0.9, roughness:0.4 }));
+      canopy.position.set(sx, sh+0.08, sz);
+      canopy.rotation.y = stall.rotation.y;
+      undergridGroup.add(canopy);
+      var stallLight = new THREE.PointLight(canopyColor, 0.9, 8, 2);
+      stallLight.position.set(sx, sh+0.6, sz);
+      undergridGroup.add(stallLight);
+      // decal on the outward-facing side of the stall
+      var faceOff = sd/2 + 0.03;
+      scatterWallDecal(undergridGroup, undergridColliders, sx + Math.cos(a)*faceOff, sh*0.55, sz + Math.sin(a)*faceOff, -a - Math.PI/2, 1.4);
+    }
+
+    // signage pylons -- tall thin masts with a big glowing ad panel near the top
+    var pylonSpots = [[18,18],[-18,18],[18,-18],[-18,-18]];
+    pylonSpots.forEach(function(p, i){
+      var mastMat = new THREE.MeshStandardMaterial({ color:0x1a1a20, roughness:0.4, metalness:0.7 });
+      var mast = new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.2,6.2,10), mastMat);
+      mast.position.set(p[0], 3.1, p[1]);
+      undergridGroup.add(mast);
+      undergridColliders.push(new THREE.Box3().setFromObject(mast));
+      var ad = HOLO_ADS[i % HOLO_ADS.length];
+      var adCanvas = document.createElement('canvas'); adCanvas.width = 512; adCanvas.height = 512;
+      drawHoloAd(adCanvas.getContext('2d'), 512, 512, ad);
+      var adTex = new THREE.CanvasTexture(adCanvas);
+      var adMat = new THREE.MeshBasicMaterial({ map:adTex, transparent:true, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, depthWrite:false, fog:false });
+      var adPlane = new THREE.Mesh(new THREE.PlaneGeometry(2.4,2.4), adMat);
+      var faceAngle = Math.atan2(-p[0], -p[1]);
+      adPlane.position.set(p[0]*0.94, 4.6, p[1]*0.94);
+      adPlane.rotation.y = faceAngle;
+      undergridGroup.add(adPlane);
+      var adLight = new THREE.PointLight(new THREE.Color(ad.glow), 1.3, 12, 2);
+      adLight.position.set(p[0], 4.8, p[1]);
+      undergridGroup.add(adLight);
+    });
+
+    // central plaza medallion -- ground-level glowing rings only, deliberately
+    // non-solid (see comment above the level) so it's a landmark, not an obstacle
+    var medGeo1 = new THREE.RingGeometry(2.6, 2.85, 48);
+    var medGeo2 = new THREE.RingGeometry(1.6, 1.75, 48);
+    var medMat = new THREE.MeshBasicMaterial({ color:0x51e8ff, transparent:true, opacity:0.7, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, depthWrite:false, fog:false });
+    [medGeo1, medGeo2].forEach(function(g){
+      var ring = new THREE.Mesh(g, medMat.clone());
+      ring.rotation.x = -Math.PI/2; ring.position.y = 0.04;
+      undergridGroup.add(ring);
+    });
+    var medallionLight = new THREE.PointLight(0x51e8ff, 1.6, 16, 2);
+    medallionLight.position.set(0, 3.2, 0);
+    undergridGroup.add(medallionLight);
+
+    var undergridAmbient = new THREE.HemisphereLight(0x2a3550, 0x050a10, 0.7);
+    undergridGroup.add(undergridAmbient);
+  })();
+
+  var dustTime = 0;
+  function updateRain(dt){
+    var r = window.__dust; if (!r) return;
+    dustTime += dt;
+    var t = dustTime;
+    for (var i=0;i<r.count;i++){
+      r.arr[i*3+1] += dt*0.45;
+      r.arr[i*3] += Math.sin(t*0.6 + r.seeds[i])*dt*0.15;
+      if (r.arr[i*3+1] > 11) r.arr[i*3+1] = 0;
+    }
+    r.pts.geometry.attributes.position.needsUpdate = true;
+  }
+
+  function collideAndSlide(pos, radius, footY){
+    var y = footY === undefined ? 0 : footY;
+    for (var i=0;i<colliders.length;i++){
+      var box = colliders[i];
+      var cx = Math.max(box.min.x, Math.min(pos.x, box.max.x));
+      var cz = Math.max(box.min.z, Math.min(pos.z, box.max.z));
+      var dx = pos.x - cx, dz = pos.z - cz;
+      var distSq = dx*dx + dz*dz;
+      // a jump that clears the top of this box (with a small margin) sails over it
+      // instead of being blocked -- this is what makes the high jump useful for
+      // hopping short cover, while tall walls/containers stay impassable
+      if (distSq < radius*radius && y < box.max.y - 0.15){
+        var dist = Math.sqrt(distSq) || 0.0001;
+        var push = radius - dist;
+        pos.x += (dx/dist)*push;
+        pos.z += (dz/dist)*push;
+      }
+    }
+    var L = ARENA_HALF - 1.1;
+    pos.x = Math.max(-L, Math.min(L, pos.x));
+    pos.z = Math.max(-L, Math.min(L, pos.z));
+  }
+
+  var envMeshesCache = null;
+  // walks the parent chain -- a mesh whose ancestor group is hidden (e.g. the
+  // OTHER level's rooftopGroup/facilityGroup while it's not the active one)
+  // must never be raycast-testable even though it's still in the scene graph.
+  // raycaster.intersectObjects() on a flat, non-recursive list only checks each
+  // object's OWN .visible flag, not its ancestors', so this has to be done here.
+  function isVisibleChain(o){
+    while (o){ if (o.visible === false) return false; o = o.parent; }
+    return true;
+  }
+  function getEnvMeshes(){
+    if (envMeshesCache) return envMeshesCache;
+    envMeshesCache = [];
+    scene.traverse(function(o){ if (o.isMesh && !o.userData.combatant && isVisibleChain(o)) envMeshesCache.push(o); });
+    return envMeshesCache;
+  }
+
+  // ================================================================== character rig (authored, no imported mesh)
+  // A completely different character from the old imported model: a boxy
+  // "Sentinel" combat-drone trooper built entirely out of primitives, with
+  // its own from-scratch joint hierarchy. Because this rig is authored here
+  // instead of imported, every hinge below rotates around a known, chosen
+  // local axis -- no more guessing at an unfamiliar skeleton's bind pose.
+  // Team affiliation reads as a glowing chest core + visor slit rather than
+  // a full recolor, since both squads share the same chassis.
+  var TEAM_COLORS = {
+    A: { accent: 0x51e8ff, name: 'ALPHA' },
+    B: { accent: 0xff3b3b, name: 'BRAVO' }
+  };
+  var CHASSIS_DARK = 0x1b1e24, CHASSIS_MID = 0x2a2e36, CHASSIS_JOINT = 0x353b46;
+
+  function b64ToArrayBuffer(b64){
+    var bin = atob(b64);
+    var len = bin.length;
+    var bytes = new Uint8Array(len);
+    for (var i=0;i<len;i++) bytes[i] = bin.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  var AXIS_X = new THREE.Vector3(1,0,0);
+  var AXIS_Y = new THREE.Vector3(0,1,0);
+
+  // scratch quaternions reused across every bone/frame/character instead of
+  // allocating new ones per call -- with ~10 hinge calls x 6 characters x 60fps
+  // this was several thousand tiny GC allocations a second, a real source of
+  // frame-time jitter ("laggy" stutter) on top of raw render cost
+  var _qScratch1 = new THREE.Quaternion();
+  var _qScratch2 = new THREE.Quaternion();
+
+  // every hinge below rotates around local X (a plain forward/back swing --
+  // the standard "hip/shoulder is a hinge" convention) unless told otherwise,
+  // since that's the axis this rig was authored against from the start.
+  function setHinge(rig, name, deg, extraAxis){
+    var b = rig.bones[name];
+    if (!b) return;
+    var base = rig.bind[name];
+    var rad = deg*Math.PI/180;
+    _qScratch1.setFromAxisAngle(extraAxis||AXIS_X, rad);
+    b.quaternion.copy(base).multiply(_qScratch1);
+  }
+
+  // one shared cheap "blob" shadow geometry -- a soft radial-gradient disc that
+  // sits on the floor under each combatant and shrinks/fades as they gain height
+  // (jumping, flying). Standing in for real shadow maps, which were the single
+  // biggest performance cost in the previous build.
+  var blobShadowTex = new THREE.CanvasTexture(radialGradientCanvas());
+  function radialGradientCanvas(){
+    var c = document.createElement('canvas'); c.width = c.height = 64;
+    var ctx = c.getContext('2d');
+    var g = ctx.createRadialGradient(32,32,0,32,32,32);
+    g.addColorStop(0, 'rgba(0,0,0,0.55)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
+    return c;
+  }
+  var blobGeo = new THREE.CircleGeometry(0.62, 16);
+
+  function bone(parent, x, y, z, name){
+    var o = new THREE.Object3D();
+    o.position.set(x, y, z);
+    o.name = name;
+    parent.add(o);
+    return o;
+  }
+  function limbMesh(parent, w, h, d, y, mat, name){
+    var m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(0, y, 0);
+    m.castShadow = true; m.receiveShadow = true;
+    m.userData.combatant = true;
+    if (name) m.name = name;
+    parent.add(m);
+    return m;
+  }
+
+  // the "Sentinel" trooper's skeleton + silhouette, built fresh out of boxes.
+  // Bone names match what animateCombatant()/setHinge() expect, so the whole
+  // locomotion system below drives this rig directly -- no retargeting, no
+  // imported bind pose to fight.
+  function buildCombatantMesh(team){
+    var accent = (TEAM_COLORS[team]||TEAM_COLORS.A).accent;
+    var chassisMat = new THREE.MeshStandardMaterial({ color:CHASSIS_DARK, roughness:0.55, metalness:0.55 });
+    var jointMat = new THREE.MeshStandardMaterial({ color:CHASSIS_JOINT, roughness:0.5, metalness:0.6 });
+    var midMat = new THREE.MeshStandardMaterial({ color:CHASSIS_MID, roughness:0.5, metalness:0.55 });
+    var coreMat = new THREE.MeshBasicMaterial({ color:accent });
+    var visorMat = new THREE.MeshBasicMaterial({ color:accent });
+
+    var root = new THREE.Group();
+    var bones = {};
+
+    var pelvis = bone(root, 0, 0.92, 0, 'pelvis'); bones.pelvis = pelvis;
+    limbMesh(pelvis, 0.34, 0.18, 0.22, 0, midMat, 'pelvis_mesh');
+
+    [['l',0.10],['r',-0.10]].forEach(function(s){
+      var thigh = bone(pelvis, s[1], -0.04, 0, 'thigh_'+s[0]); bones['thigh_'+s[0]] = thigh;
+      limbMesh(thigh, 0.15, 0.42, 0.16, -0.21, chassisMat, 'thigh_mesh');
+      var calf = bone(thigh, 0, -0.42, 0, 'calf_'+s[0]); bones['calf_'+s[0]] = calf;
+      limbMesh(calf, 0.13, 0.40, 0.14, -0.20, chassisMat, 'calf_mesh');
+      var foot = bone(calf, 0, -0.40, 0.05, 'foot_'+s[0]); bones['foot_'+s[0]] = foot;
+      limbMesh(foot, 0.15, 0.09, 0.27, -0.03, jointMat, 'foot_mesh');
+    });
+
+    var spine01 = bone(pelvis, 0, 0.10, 0, 'spine_01'); bones.spine_01 = spine01;
+    limbMesh(spine01, 0.30, 0.16, 0.20, 0.06, midMat, 'spine01_mesh');
+    var spine02 = bone(spine01, 0, 0.16, 0, 'spine_02'); bones.spine_02 = spine02;
+    limbMesh(spine02, 0.36, 0.26, 0.23, 0.09, midMat, 'spine02_mesh');
+    var coreMesh = new THREE.Mesh(new THREE.BoxGeometry(0.11,0.11,0.03), coreMat);
+    coreMesh.position.set(0, 0.11, 0.125);
+    coreMesh.name = 'team_core';
+    spine02.add(coreMesh);
+
+    var neck = bone(spine02, 0, 0.24, 0, 'neck_01'); bones.neck_01 = neck;
+    limbMesh(neck, 0.11, 0.07, 0.11, 0.03, jointMat, 'neck_mesh');
+    var head = bone(neck, 0, 0.11, 0, 'head'); bones.head = head;
+    limbMesh(head, 0.21, 0.21, 0.22, 0.09, chassisMat, 'head_mesh');
+    var visorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.17,0.035,0.02), visorMat);
+    visorMesh.position.set(0, 0.10, 0.11);
+    visorMesh.name = 'head_visor';
+    head.add(visorMesh);
+
+    [['l',0.22],['r',-0.22]].forEach(function(s){
+      var upper = bone(spine02, s[1], 0.20, 0, 'upperarm_'+s[0]); bones['upperarm_'+s[0]] = upper;
+      limbMesh(upper, 0.115, 0.28, 0.115, -0.14, chassisMat, 'upperarm_mesh');
+      var lower = bone(upper, 0, -0.28, 0, 'lowerarm_'+s[0]); bones['lowerarm_'+s[0]] = lower;
+      limbMesh(lower, 0.10, 0.26, 0.10, -0.13, chassisMat, 'lowerarm_mesh');
+      var hand = bone(lower, 0, -0.26, 0, 'hand_'+s[0]); bones['hand_'+s[0]] = hand;
+      limbMesh(hand, 0.095, 0.11, 0.095, -0.05, jointMat, 'hand_mesh');
+    });
+
+    // resting arm pose is baked directly into the bind quaternions below --
+    // elbows already bent in, close to the body -- so every animated pose
+    // is a hinge FROM a natural stance, not a correction out of a T-pose.
+    bones.upperarm_l.rotation.x = 0.16;
+    bones.upperarm_r.rotation.x = 1.25;
+    bones.lowerarm_l.rotation.x = 0.30;
+    bones.lowerarm_r.rotation.x = 1.35;
+
+    var bind = {};
+    Object.keys(bones).forEach(function(n){ bind[n] = bones[n].quaternion.clone(); });
+
+    return { root: root, rig: { bones: bones, bind: bind }, coreMesh: coreMesh, visorMesh: visorMesh };
+  }
+
+  function setCombatantTeam(c, team){
+    c.team = team;
+    var accent = (TEAM_COLORS[team]||TEAM_COLORS.A).accent;
+    if (c.coreMesh) c.coreMesh.material.color.setHex(accent);
+    if (c.visorMesh) c.visorMesh.material.color.setHex(accent);
+    if (c.gun) c.gun.traverse(function(o){ if (o.userData.teamStripe) o.material.color.setHex(accent); });
+  }
+
+  function makeCombatant(team, role){
+    role = role || 'bot';
+    var built = buildCombatantMesh(team);
+    var root = built.root, rig = built.rig;
+
+    var group = new THREE.Group();
+    group.add(root);
+    scene.add(group);
+
+    var blob = new THREE.Mesh(blobGeo, new THREE.MeshBasicMaterial({ map:blobShadowTex, transparent:true, opacity:0.45, depthWrite:false, fog:false }));
+    blob.rotation.x = -Math.PI/2;
+    blob.position.y = 0.02;
+    scene.add(blob);
+
+    // weapon prop: tracked to the right-hand bone's world position every frame rather
+    // than parented to it directly, so the barrel always reads as pointing forward
+    // regardless of how the hand bone itself is twisted by the pose
+    var gun = buildBlaster(team);
+    group.add(gun);
+
+    var muzzle = new THREE.Object3D();
+    muzzle.position.set(0, 0.05, -0.62);
+    gun.add(muzzle);
+
+    var headBone = rig.bones['head'];
+
+    var c = {
+      team: team, role: role, isBot: role==='bot', group: group, root: root, rig: rig,
+      gun: gun, muzzle: muzzle, headBone: headBone, blob: blob,
+      coreMesh: built.coreMesh, visorMesh: built.visorMesh,
+      hp: role==='player'?100:70, maxHp: role==='player'?100:70,
+      alive: true, state:'idle', phase: Math.random()*10,
+      pos: new THREE.Vector3(), vel: new THREE.Vector3(),
+      facingYaw: 0, deathT: 0, hitFlinch: 0, recoil: 0, reloadT: -1,
+      muzzleWorld: new THREE.Vector3()
+    };
+    setCombatantTeam(c, team);
+    return c;
+  }
+
+  function buildBlaster(team){
+    var col = (TEAM_COLORS[team]||TEAM_COLORS.A).accent;
+    var g = new THREE.Group();
+    var metalMat = new THREE.MeshStandardMaterial({ color:0x11151c, roughness:0.3, metalness:0.85, envMapIntensity:1.2 });
+    var gripMat = new THREE.MeshStandardMaterial({ color:0x1a1a1a, roughness:0.6, metalness:0.2 });
+    var glowMat = new THREE.MeshBasicMaterial({ color: col });
+
+    var body = new THREE.Mesh(new THREE.BoxGeometry(0.09,0.11,0.5), metalMat);
+    body.position.set(0,0,-0.1);
+    g.add(body);
+    var barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022,0.022,0.32,10), metalMat);
+    barrel.rotation.x = Math.PI/2;
+    barrel.position.set(0,0.01,-0.5);
+    g.add(barrel);
+    var mag = new THREE.Mesh(new THREE.BoxGeometry(0.05,0.16,0.08), gripMat);
+    mag.position.set(0,-0.13,-0.02);
+    g.add(mag);
+    var grip = new THREE.Mesh(new THREE.BoxGeometry(0.05,0.16,0.07), gripMat);
+    grip.position.set(0,-0.11,0.13);
+    grip.rotation.x = 0.35;
+    g.add(grip);
+    var sight = new THREE.Mesh(new THREE.BoxGeometry(0.02,0.03,0.14), metalMat);
+    sight.position.set(0,0.075,-0.15);
+    g.add(sight);
+    var stripe = new THREE.Mesh(new THREE.BoxGeometry(0.015,0.015,0.4), glowMat);
+    stripe.position.set(0.05,0.02,-0.1);
+    stripe.userData.teamStripe = true;
+    g.add(stripe);
+    g.traverse(function(o){ if (o.isMesh){ o.castShadow=true; o.userData.combatant=true; } });
+    return g;
+  }
+
+  // ---------------------------------------------------------------- animation driver
+  function animateCombatant(c, dt, params){
+    // params: {moveSpeedNorm, sprinting, grounded, aimPitchDeg}
+    if (c.blob){
+      c.blob.position.x = c.group.position.x;
+      c.blob.position.z = c.group.position.z;
+      var h = c.group.position.y;
+      var k = Math.max(0.12, 1 - h/6);
+      c.blob.scale.setScalar(k);
+      c.blob.material.opacity = 0.45*k;
+      c.blob.visible = c.state !== 'dead';
+    }
+    if (c.state === 'dead'){
+      c.deathT += dt;
+      var t = Math.min(1, c.deathT/0.22);
+      c.root.rotation.x = t * (Math.PI/2 * 0.92);
+      c.group.position.y = 0;
+      if (t >= 1 && c.group.visible){
+        c.group.visible = false;
+        if (c.gun) c.gun.visible = false;
+      }
+      return;
+    }
+    c.root.rotation.x += (0 - c.root.rotation.x) * Math.min(1, dt*8);
+
+    if (c._animSpeed === undefined) c._animSpeed = 0;
+    if (c._animSprint === undefined) c._animSprint = 0;
+    var speedEase = 1 - Math.exp(-dt*10);
+    var sprintEase = 1 - Math.exp(-dt*7);
+    c._animSpeed += (params.moveSpeedNorm - c._animSpeed) * speedEase;
+    c._animSprint += ((params.sprinting?1:0) - c._animSprint) * sprintEase;
+    var moveSpeedNorm = c._animSpeed;
+    var sprinting = c._animSprint;
+    // running/sprinting reads as a distinctly bigger, faster gait than walking --
+    // cadence, stride length, knee lift and torso lean all scale with both how
+    // fast the character is moving AND whether they're actually sprinting
+    var cadence = 2.3 + moveSpeedNorm*(2.3 + sprinting*4.4);
+    c.phase += dt*cadence;
+    var s = Math.sin(c.phase);
+    var legAmp = moveSpeedNorm*(28 + sprinting*18);
+    var kneeAmp = 10 + moveSpeedNorm*(42 + sprinting*22);
+
+    setHinge(c.rig, 'thigh_l', s*legAmp);
+    setHinge(c.rig, 'thigh_r', -s*legAmp);
+    // knee lift leads the thigh swing slightly (a touch of heel-strike timing)
+    // instead of peaking in perfect lockstep, which reads as a stiff robotic gait
+    var kneeS = Math.sin(c.phase + 0.4);
+    setHinge(c.rig, 'calf_l', Math.max(0, kneeS)*kneeAmp);
+    setHinge(c.rig, 'calf_r', Math.max(0, -kneeS)*kneeAmp);
+
+    // forward lean grows sharply once sprinting -- the clearest "this is a run,
+    // not a walk" signal along with cadence/stride
+    var lean = (2 + sprinting*13)*moveSpeedNorm + (moveSpeedNorm<0.05 ? Math.sin(c.phase*0.35)*1.0 : 0);
+    setHinge(c.rig, 'spine_01', -lean*0.4);
+    setHinge(c.rig, 'spine_02', -lean*0.6 - (params.hitFlinch||0)*12);
+    // subtle hip/torso counter-twist -- shoulders rotate opposite the hips as the
+    // legs stride, the single biggest thing separating a "sliding mannequin" gait
+    // from one that reads as a body actually walking. Applied as an extra local-Y
+    // rotation on top of the flex/lean hinge already set above.
+    var twistAmp = moveSpeedNorm*(5 + sprinting*4);
+    var spine2 = c.rig.bones['spine_02'];
+    if (spine2){
+      var twistQ = _qScratch2.setFromAxisAngle(AXIS_Y, -s*twistAmp*Math.PI/180);
+      spine2.quaternion.multiply(twistQ);
+    }
+
+    // arms swing contralateral to the legs (left arm forward with the right
+    // leg, and vice versa) -- the support hand swings freely as a counter-
+    // balance, while the gun hand stays mostly locked on target and only
+    // pumps a little, plus recoil kick and aim-pitch tracking
+    var armAmp = moveSpeedNorm*(24 + sprinting*24);
+    setHinge(c.rig, 'upperarm_l', -s*armAmp);
+    setHinge(c.rig, 'lowerarm_l', Math.max(0, s)*armAmp*0.5);
+
+    var recoilKick = c.recoil||0;
+    var aimAdj = (params.aimPitchDeg||0)*0.3;
+    setHinge(c.rig, 'upperarm_r', s*armAmp*0.18 - recoilKick*22 - aimAdj);
+    setHinge(c.rig, 'lowerarm_r', -recoilKick*14 - aimAdj*0.4);
+
+    if (c.reloadT >= 0){
+      var rt = Math.min(1, c.reloadT);
+      var dip = Math.sin(rt*Math.PI)*30;
+      setHinge(c.rig, 'upperarm_l', -s*armAmp*0.3 - dip);
+      setHinge(c.rig, 'lowerarm_l', dip*1.1);
+    }
+
+    setHinge(c.rig, 'neck_01', (params.aimPitchDeg||0)*0.15);
+    // counter-twist the head against the torso twist so the head/aim stays
+    // steadier than the shoulders while still reading as attached to the body
+    var neckBone = c.rig.bones['neck_01'];
+    if (neckBone){
+      var neckCounterQ = _qScratch1.setFromAxisAngle(AXIS_Y, s*twistAmp*0.6*Math.PI/180);
+      neckBone.quaternion.multiply(neckCounterQ);
+    }
+
+    var bodyBob = Math.abs(s)*moveSpeedNorm*(0.028 + sprinting*0.014);
+    c.root.position.y = bodyBob;
+
+    // keep the weapon prop glued to the hand's world position but always pointed
+    // forward, sidestepping the source rig's inconsistent bone-twist for this bone
+    if (handRForGun(c)){
+      c.root.updateMatrixWorld(true);
+      var handWorld = new THREE.Vector3();
+      handRForGun(c).getWorldPosition(handWorld);
+      var local = c.group.worldToLocal(handWorld);
+      c.gun.position.copy(local);
+      c.gun.rotation.set(-0.1, Math.PI, 0);
+    }
+  }
+  function handRForGun(c){ return c.rig.bones['hand_r']; }
+
+  // ================================================================== boot
+  // no external model to fetch anymore -- the character is built entirely
+  // from primitives above, so the game can start immediately.
+  setLoad(60);
+  startGame();
+
+  function startGame(){
+
+  // ---------------------------------------------------------------- player + bots
+  var player = makeCombatant('A', 'player');
+  player.maxAmmo = 24; player.ammo = 24;
+  var ABILITY_MAX = { dash: 6, nova: 12, surge: 16 };
+  player.cooldown = { dash: 0, nova: 0, surge: 0 };
+  player.baseSpeed = 5.6;
+  player.dashDist = 7; player.dashDmg = 25;
+  player.novaRadius = 12; player.novaDmg = 55;
+  player.surgeHeal = 38;
+
+  // applies the hero picked on the menu -- resets HP/speed/ability tuning and
+  // the gun's tint to match. Called once from the DEPLOY click, before
+  // applyLevelSelection() positions everyone on the chosen map.
+  function applyHeroSelection(){
+    var hero = HEROES[currentHero] || HEROES.vanguard;
+    player.maxHp = hero.maxHp; player.hp = hero.maxHp;
+    player.baseSpeed = hero.baseSpeed;
+    ABILITY_MAX.dash = hero.dashCd; ABILITY_MAX.nova = hero.novaCd; ABILITY_MAX.surge = hero.surgeCd;
+    player.cooldown.dash = 0; player.cooldown.nova = 0; player.cooldown.surge = 0;
+    player.dashDist = hero.dashDist; player.dashDmg = hero.dashDmg;
+    player.novaRadius = hero.novaRadius; player.novaDmg = hero.novaDmg;
+    player.surgeHeal = hero.surgeHeal;
+    if (player.gun){
+      player.gun.traverse(function(m){ if (m.material && m.material.color) m.material.color.setHex(hero.tint); });
+    }
+    if (viewGun){
+      viewGun.traverse(function(m){ if (m.material && m.material.color) m.material.color.setHex(hero.tint); });
+    }
+    attachHeroCosmetics(hero, currentHero);
+  }
+
+  // gives each class a distinct cosmetic silhouette: small primitive meshes
+  // parented straight onto the shared rig's bones, authored directly in
+  // meters since this rig has no cm-to-m scale mismatch to cancel out.
+  function clearHeroCosmetics(){
+    (player.cosmetics||[]).forEach(function(o){ if (o.parent) o.parent.remove(o); });
+    player.cosmetics = [];
+  }
+  function addCosmetic(bone, mesh, pos, rot){
+    if (!bone) return;
+    if (pos) mesh.position.set(pos[0], pos[1], pos[2]);
+    if (rot) mesh.rotation.set(rot[0], rot[1], rot[2]);
+    bone.add(mesh);
+    player.cosmetics.push(mesh);
+  }
+  function attachHeroCosmetics(hero, heroKey){
+    clearHeroCosmetics();
+    var rig = player.rig;
+    if (!rig || !rig.bones) return;
+    var accent = new THREE.Color(hero.tint);
+    if (heroKey === 'jugger'){
+      // bulky reinforced plating -- big angular shoulder guards, a chest
+      // slab, and a fuel-cell pack riding the spine
+      var padMat = new THREE.MeshStandardMaterial({ color:0x2a231a, roughness:0.5, metalness:0.6, emissive:accent, emissiveIntensity:0.35 });
+      addCosmetic(rig.bones['upperarm_l'], new THREE.Mesh(new THREE.BoxGeometry(0.20,0.16,0.20), padMat), [0.02,0.10,0]);
+      addCosmetic(rig.bones['upperarm_r'], new THREE.Mesh(new THREE.BoxGeometry(0.20,0.16,0.20), padMat.clone()), [-0.02,0.10,0]);
+      var chestMat = new THREE.MeshStandardMaterial({ color:0x201c16, roughness:0.5, metalness:0.65, emissive:accent, emissiveIntensity:0.3 });
+      addCosmetic(rig.bones['spine_02'], new THREE.Mesh(new THREE.BoxGeometry(0.24,0.22,0.08), chestMat), [0,0.05,0.10]);
+      var tankMat = new THREE.MeshStandardMaterial({ color:0x1c1a16, roughness:0.4, metalness:0.7, emissive:accent, emissiveIntensity:0.5 });
+      addCosmetic(rig.bones['spine_01'], new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.09,0.30,10), tankMat), [0,0.02,-0.13], [0.35,0,0]);
+    } else if (heroKey === 'phantom'){
+      // sleek recon silhouette -- a raked tail fin off the spine and a thin
+      // glowing visor band across the helmet
+      var finMat = new THREE.MeshBasicMaterial({ color:accent, transparent:true, opacity:0.8, side:THREE.DoubleSide });
+      addCosmetic(rig.bones['spine_02'], new THREE.Mesh(new THREE.ConeGeometry(0.035,0.34,6), finMat), [0,0.16,-0.09], [2.4,0,0]);
+      var visorMat = new THREE.MeshBasicMaterial({ color:accent, transparent:true, opacity:0.95, blending:THREE.AdditiveBlending, depthWrite:false });
+      addCosmetic(rig.bones['head'], new THREE.Mesh(new THREE.PlaneGeometry(0.13,0.03), visorMat), [0,0.015,0.075]);
+    } else {
+      // vanguard: clean twin shoulder trim + a small chest emblem
+      var trimMat = new THREE.MeshStandardMaterial({ color:0x25252a, roughness:0.45, metalness:0.6, emissive:accent, emissiveIntensity:0.3 });
+      addCosmetic(rig.bones['upperarm_l'], new THREE.Mesh(new THREE.BoxGeometry(0.15,0.06,0.15), trimMat), [0.02,0.13,0]);
+      addCosmetic(rig.bones['upperarm_r'], new THREE.Mesh(new THREE.BoxGeometry(0.15,0.06,0.15), trimMat.clone()), [-0.02,0.13,0]);
+      var emblemMat = new THREE.MeshBasicMaterial({ color:accent, transparent:true, opacity:0.9, side:THREE.DoubleSide });
+      addCosmetic(rig.bones['spine_02'], new THREE.Mesh(new THREE.PlaneGeometry(0.09,0.09), emblemMat), [0,0.08,0.095]);
+    }
+  }
+  player.dashTrailT = 0;
+  player.ultCharge = 0;
+  player.flying = false;
+  player.flightT = 0;
+
+  // dedicated first-person viewmodel: the world-space gun tracks the (hidden, in
+  // FPV) body's hand bone which sits too low/off-frame to read as a proper FPS
+  // weapon, so instead hang a second copy of it straight off the camera
+  var viewGun = buildBlaster('A');
+  camera.add(viewGun);
+  viewGun.position.set(0.24, -0.22, -0.5);
+  viewGun.rotation.set(0, Math.PI, 0);
+  viewGun.visible = false;
+  player.stamina = 100; player.maxStamina = 100;
+  player.lastDamageTime = -999;
+  player.kills = 0; player.deaths = 0; player.streak = 0;
+  player.fireCooldown = 0;
+  player.group.position.set(0, 0, 10);
+
+  // ---------------------------------------------------------------- teams & modes
+  // 3v3: each squad is topped up to 3 members with bots for whichever human
+  // seats are empty. Team rosters (and therefore bot count/teams) are fixed
+  // at deploy time by assignTeams()/setupBots() -- see the deploy click
+  // handler below -- rather than recalculated live if peers join mid-match.
+  var currentMode = 'tdm'; // 'tdm' | 'objective'
+  var teamScore = { A:0, B:0 };
+  var TEAM_KILL_LIMIT = 30;
+  var botNamePool = ["VIPER-1","REAPER-X","GLITCH-9","WRAITH-7","HAVOC-3","TALON-2"];
+  var bots = [];
+  // `randomSpawn` is swapped by applyLevelSelection() to the facility variant
+  // when that level is chosen -- kept as a reassignable var (not a function
+  // declaration) for exactly that reason.
+  function randomSpawnRooftop(){
+    var a = Math.random()*Math.PI*2;
+    var r = 10 + Math.random()*(ARENA_HALF-8);
+    return new THREE.Vector3(Math.cos(a)*r, 0, Math.sin(a)*r);
+  }
+  var randomSpawn = randomSpawnRooftop;
+
+  function countPeersOnTeam(team){
+    var n = 0;
+    Object.keys(netPeers).forEach(function(label){
+      var pres = netPeers[label].lastPresence;
+      if (pres && (pres.team||'A') === team) n++;
+    });
+    return n;
+  }
+
+  // balances the local player onto whichever squad currently has fewer
+  // members (based on the room's live presence snapshot at deploy time);
+  // solo play always lands on Alpha.
+  function assignTeams(){
+    var countA = countPeersOnTeam('A'), countB = countPeersOnTeam('B');
+    var team = countB < countA ? 'B' : 'A';
+    setCombatantTeam(player, team);
+    if (player.gun) player.gun.traverse(function(o){ if (o.userData.teamStripe) o.material.color.setHex((HEROES[currentHero]||HEROES.vanguard).tint); });
+  }
+
+  // rebuilds the bot roster from scratch for the chosen mode/level: each
+  // squad is topped up to 3 members total (humans + bots). Bots are cleared
+  // and recreated every deploy rather than pooled, since a 3v3 match only
+  // ever needs at most 5 of them (solo play: 2 teammates + 3 opponents).
+  function setupBots(){
+    bots.forEach(function(b){ scene.remove(b.group); scene.remove(b.blob); });
+    bots = [];
+    var teamAHumans = (player.team==='A'?1:0) + countPeersOnTeam('A');
+    var teamBHumans = (player.team==='B'?1:0) + countPeersOnTeam('B');
+    // Multiplayer Arena mode is PvP-only -- no bots ever fill seats there,
+    // even if only one real operator is currently in the arena (they simply
+    // wait; see pvpWaitTagEl in updateMatch()).
+    var need = currentArenaMode === 'pvp'
+      ? { A:0, B:0 }
+      : { A: Math.max(0, 3-teamAHumans), B: Math.max(0, 3-teamBHumans) };
+    var names = botNamePool.slice();
+    ['A','B'].forEach(function(team){
+      for (var i=0;i<need[team];i++){
+        var bot = makeCombatant(team, 'bot');
+        bot.name = names.shift() || (team+'-BOT-'+i);
+        bot.pos = randomSpawn();
+        bot.group.position.copy(bot.pos);
+        bot.target = randomSpawn();
+        bot.fireTimer = Math.random()*1.2;
+        bot.respawnT = 0;
+        bot.kills = 0; bot.deaths = 0;
+
+        var bc = document.createElement('canvas'); bc.width=128; bc.height=16;
+        var btex = new THREE.CanvasTexture(bc);
+        var bar = new THREE.Sprite(new THREE.SpriteMaterial({ map:btex, transparent:true, depthTest:false }));
+        bar.scale.set(1.1,0.14,1);
+        bar.position.set(0, 1.95, 0);
+        bot.group.add(bar);
+        bot.barCanvas = bc; bot.barTex = btex; bot.barSprite = bar;
+        drawBotBar(bot);
+        bots.push(bot);
+      }
+    });
+  }
+
+  // nearest opposing-team, alive target for a bot to chase/attack -- scans
+  // the player, every other bot, and every tracked multiplayer peer
+  function findNearestEnemyFor(bot){
+    var myTeam = bot.team, myPos = bot.pos, best = null, bestD = Infinity;
+    if (player.alive && player.team !== myTeam){
+      var d0 = myPos.distanceTo(player.group.position);
+      if (d0 < bestD){ bestD = d0; best = { kind:'player', pos:player.group.position }; }
+    }
+    bots.forEach(function(b){
+      if (b === bot || !b.alive || b.team === myTeam) return;
+      var d1 = myPos.distanceTo(b.pos);
+      if (d1 < bestD){ bestD = d1; best = { kind:'bot', ref:b, pos:b.pos }; }
+    });
+    Object.keys(netPeers).forEach(function(label){
+      var entry = netPeers[label], pres = entry.lastPresence;
+      if (!pres || pres.level !== currentLevel || pres.alive === false) return;
+      if ((pres.team||'A') === myTeam) return;
+      var d2 = myPos.distanceTo(entry.combatant.pos);
+      if (d2 < bestD){ bestD = d2; best = { kind:'peer', pos:entry.combatant.pos, netId:pres.id }; }
+    });
+    return best ? { target: best, dist: bestD } : null;
+  }
+
+  function drawBotBar(bot){
+    var ctx = bot.barCanvas.getContext('2d');
+    ctx.clearRect(0,0,128,16);
+    ctx.fillStyle = 'rgba(6,8,12,0.85)';
+    ctx.fillRect(0,0,128,16);
+    var pct = Math.max(0, bot.hp/bot.maxHp);
+    ctx.fillStyle = pct > 0.5 ? '#ff5a5a' : (pct > 0.2 ? '#ffab2e' : '#ff2020');
+    ctx.fillRect(2,2, 124*pct, 12);
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.strokeRect(0.5,0.5,127,15);
+    bot.barTex.needsUpdate = true;
+  }
+
+  // ================================================================== multiplayer (this server's WebSocket arena)
+  // Multiplayer Arena mode talks to THIS server's own WebSocket endpoint
+  // (/ws) rather than any browser-platform capability, so it works the same
+  // whether the page is opened from this Render deployment directly or
+  // anywhere else it's hosted from. HP, kills and match state are decided
+  // by the server (see server/arena.js) -- a client can only ever report
+  // its own position/animation and *claim* a hit; the server is the one
+  // that actually docks health and declares kills. Position itself is still
+  // client-reported (there's no full server-side physics simulation here),
+  // so a modified client could still teleport or wallhack -- see the
+  // project README for that trade-off.
+  var arenaSocket = null;
+  var netId = null; // assigned by the server on 'welcome', not chosen locally
+  var netPeers = {}; // peer id -> { combatant, lastPresence }
+  var mpTagEl = document.getElementById('mpTag');
+  var mpCountEl = document.getElementById('mpCount');
+  var lastPresenceSend = 0;
+
+  function makePeerCombatant(team){
+    var c = makeCombatant(team||'A', 'peer');
+    var bc = document.createElement('canvas'); bc.width = 128; bc.height = 16;
+    var btex = new THREE.CanvasTexture(bc);
+    var bar = new THREE.Sprite(new THREE.SpriteMaterial({ map:btex, transparent:true, depthTest:false }));
+    bar.scale.set(1.1,0.14,1);
+    bar.position.set(0, 1.95, 0);
+    c.group.add(bar);
+    c.barCanvas = bc; c.barTex = btex; c.barSprite = bar;
+    c.netAlive = true;
+    return c;
+  }
+
+  function removePeerCombatant(id){
+    var entry = netPeers[id];
+    if (!entry) return;
+    scene.remove(entry.combatant.group);
+    scene.remove(entry.combatant.blob);
+    delete netPeers[id];
+  }
+
+  function updateOnlineTag(count){
+    if (mpTagEl){ mpTagEl.classList.toggle('hidden', count === 0); if (mpCountEl) mpCountEl.textContent = count; }
+  }
+
+  // one authoritative snapshot -> full peer roster; self's hp/kills/team are
+  // NOT taken from here (see handleArenaMessage's 'damaged'/'kill' cases) --
+  // only used to keep every OTHER player's combatant up to date.
+  function applySnapshot(list){
+    var seen = {};
+    list.forEach(function(p){
+      if (p.id === netId) return; // that's us -- see above
+      seen[p.id] = true;
+      if (!netPeers[p.id]) netPeers[p.id] = { combatant: makePeerCombatant(p.team), lastPresence: null };
+      else if (netPeers[p.id].combatant.team !== p.team) setCombatantTeam(netPeers[p.id].combatant, p.team);
+      netPeers[p.id].lastPresence = { x:p.x, z:p.z, ry:p.ry, hp:p.hp, maxHp:p.maxHp, alive:p.alive, team:p.team, name:p.name, level:currentLevel };
+      netPeers[p.id].combatant.group.visible = p.alive !== false;
+    });
+    Object.keys(netPeers).forEach(function(id){ if (!seen[id]) removePeerCombatant(id); });
+    updateOnlineTag(list.length > 0 ? list.length - 1 : 0);
+  }
+
+  function handleArenaMessage(msg){
+    if (msg.t === 'welcome'){
+      netId = msg.selfId;
+      setCombatantTeam(player, msg.team);
+      teamScore = msg.teamScore || teamScore;
+      matchOver = !!msg.matchOver;
+      objStatusEl.textContent = 'ALPHA ' + (teamScore.A||0) + '  —  ' + (teamScore.B||0) + ' BRAVO';
+      objFillEl.style.width = Math.max(0, Math.min(100, 50 + (teamScore.A-teamScore.B)/TEAM_KILL_LIMIT*50)) + '%';
+      objTimerEl.textContent = 'LIVE';
+    } else if (msg.t === 'snapshot'){
+      applySnapshot(msg.players || []);
+      teamScore = msg.teamScore || teamScore;
+      if (msg.matchOver && !matchOver) endMatch(null); // safety net if a matchEnd message was dropped
+    } else if (msg.t === 'damaged'){
+      if (msg.targetId !== netId || !player.alive) return;
+      player.hp = msg.hp;
+      player.hitFlinch = 1;
+      player.lastDamageTime = clock.getElapsedTime();
+      var vg = document.getElementById('dmgVignette');
+      vg.style.boxShadow = 'inset 0 0 140px 30px rgba(255,59,59,0.5)';
+      setTimeout(function(){ vg.style.boxShadow = 'inset 0 0 0 0 rgba(255,59,59,0)'; }, 140);
+    } else if (msg.t === 'kill'){
+      teamScore = msg.teamScore || teamScore;
+      if (msg.targetId === netId){
+        player.hp = 0;
+        addKillFeed(msg.killerName || 'RIVAL MERC', false);
+        playerDie();
+      } else if (msg.killerId === netId){
+        player.kills++; player.streak++;
+        player.ultCharge = Math.min(100, player.ultCharge + 12);
+        addKillFeed(msg.targetName || 'HOSTILE', true);
+        document.getElementById('killsNum').textContent = player.kills;
+        document.getElementById('streakNum').textContent = player.streak;
+      }
+      objStatusEl.textContent = 'ALPHA ' + (teamScore.A||0) + '  —  ' + (teamScore.B||0) + ' BRAVO';
+      objFillEl.style.width = Math.max(0, Math.min(100, 50 + (teamScore.A-teamScore.B)/TEAM_KILL_LIMIT*50)) + '%';
+    } else if (msg.t === 'matchEnd'){
+      teamScore = msg.teamScore || teamScore;
+      endMatch(msg.winner);
+    } else if (msg.t === 'leave'){
+      removePeerCombatant(msg.id);
+    }
+  }
+
+  function damagePeer(peerId, dmg, headshot){
+    if (!arenaSocket || arenaSocket.readyState !== 1) return;
+    arenaSocket.send(JSON.stringify({ t:'hit', targetId: peerId, dmg: dmg, headshot: !!headshot }));
+  }
+
+  function updateNetPeers(dt){
+    Object.keys(netPeers).forEach(function(label){
+      var entry = netPeers[label];
+      var pres = entry.lastPresence;
+      if (!pres || pres.level !== currentLevel || pres.alive === false) return;
+      var c = entry.combatant;
+      var targetX = typeof pres.x === 'number' ? pres.x : c.pos.x;
+      var targetZ = typeof pres.z === 'number' ? pres.z : c.pos.z;
+      var moved = Math.hypot(targetX - c.pos.x, targetZ - c.pos.z);
+      // smooth toward the last reported position instead of snapping --
+      // snapshots land ~12x/sec, not every frame
+      c.pos.x += (targetX - c.pos.x) * Math.min(1, dt*10);
+      c.pos.z += (targetZ - c.pos.z) * Math.min(1, dt*10);
+      c.group.position.set(c.pos.x, 0, c.pos.z);
+      c.group.rotation.y = (typeof pres.ry === 'number' ? pres.ry : 0) + Math.PI;
+      c.hp = typeof pres.hp === 'number' ? pres.hp : c.hp;
+      c.maxHp = typeof pres.maxHp === 'number' ? pres.maxHp : c.maxHp;
+      drawBotBar(c);
+      animateCombatant(c, dt, { moveSpeedNorm: Math.min(1, moved*8), sprinting: moved > 0.12, aimPitchDeg: 0, hitFlinch: 0 });
+      c.barSprite.quaternion.copy(camera.quaternion);
+    });
+  }
+
+  function sendPresence(t){
+    if (!arenaSocket || arenaSocket.readyState !== 1 || t - lastPresenceSend < 0.1) return;
+    lastPresenceSend = t;
+    arenaSocket.send(JSON.stringify({
+      x: player.group.position.x, z: player.group.position.z,
+      ry: player.group.rotation.y - Math.PI, hero: currentHero,
+      anim: player.state, t: 'state'
+    }));
+  }
+
+  // Opens the WebSocket connection for Multiplayer Arena mode and calls
+  // onReady() once the server has confirmed our team (its 'welcome'
+  // message) -- deploying waits for that so bot-fill/team logic never runs
+  // ahead of the server's own assignment. onError() fires on a connection
+  // failure or a 6s timeout (server unreachable, expired session, etc).
+  function connectArena(onReady, onError){
+    if (arenaSocket && arenaSocket.readyState === 1){ onReady(); return; }
+    var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    var ws = new WebSocket(proto + '://' + location.host + '/ws?token=' + encodeURIComponent(authToken));
+    var settled = false;
+    var timeout = setTimeout(function(){ if (!settled){ settled = true; ws.close(); onError('TIMED OUT REACHING THE ARENA SERVER'); } }, 6000);
+    ws.addEventListener('message', function(ev){
+      var msg; try { msg = JSON.parse(ev.data); } catch(e){ return; }
+      if (!settled && msg.t === 'welcome'){ settled = true; clearTimeout(timeout); }
+      handleArenaMessage(msg);
+      if (msg.t === 'welcome') onReady();
+    });
+    ws.addEventListener('close', function(ev){
+      if (!settled){ settled = true; clearTimeout(timeout); onError(ev.reason || 'CONNECTION CLOSED'); }
+      if (arenaSocket === ws) arenaSocket = null;
+    });
+    ws.addEventListener('error', function(){ /* the close handler above reports it */ });
+    arenaSocket = ws;
+  }
+  function disconnectArena(){
+    if (arenaSocket){ try { arenaSocket.close(); } catch(e){} arenaSocket = null; }
+    Object.keys(netPeers).forEach(removePeerCombatant);
+    updateOnlineTag(0);
+  }
+
+  // Lightweight population readout on the menu itself, before anyone has
+  // joined the arena -- a plain REST poll rather than a live socket, since
+  // there's no reason to hold a WebSocket open just to show a number.
+  function pollOnlineCount(){
+    fetch('/api/online').then(function(r){ return r.json(); }).then(function(d){
+      if (onlineCountMenuEl && !arenaSocket) onlineCountMenuEl.innerHTML = '&#9679; ' + (d.count||0) + ' IN ARENA';
+    }).catch(function(){});
+  }
+  setInterval(pollOnlineCount, 5000);
+  pollOnlineCount();
+
+  ready();
+
+  // ---------------------------------------------------------------- FX
+  var activeFX = [];
+  function spawnBurst(position, color, count){
+    count = count || 24;
+    var geo = new THREE.BufferGeometry();
+    var pos = new Float32Array(count*3);
+    var vel = [];
+    for (var i=0;i<count;i++){
+      pos[i*3]=position.x; pos[i*3+1]=position.y; pos[i*3+2]=position.z;
+      vel.push(new THREE.Vector3((Math.random()*2-1),(Math.random()*1.3),(Math.random()*2-1)).normalize().multiplyScalar(2+Math.random()*3.5));
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+    var mat = new THREE.PointsMaterial({ color:color, size:0.06, transparent:true, opacity:1, blending:THREE.AdditiveBlending, depthWrite:false });
+    var pts = new THREE.Points(geo, mat);
+    scene.add(pts);
+    activeFX.push({ type:'burst', obj:pts, vel:vel, life:0, maxLife:0.6 });
+  }
+  function spawnTracer(from, to, color){
+    var geo = new THREE.BufferGeometry().setFromPoints([from, to]);
+    var mat = new THREE.LineBasicMaterial({ color:color, transparent:true, opacity:0.95 });
+    var line = new THREE.Line(geo, mat);
+    scene.add(line);
+    activeFX.push({ type:'tracer', obj:line, life:0, maxLife:0.07 });
+  }
+  function spawnRing(position, color, maxR){
+    var geo = new THREE.RingGeometry(0.1,0.3,40);
+    var mat = new THREE.MeshBasicMaterial({ color:color, transparent:true, opacity:0.85, side:THREE.DoubleSide, blending:THREE.AdditiveBlending, depthWrite:false });
+    var ring = new THREE.Mesh(geo, mat);
+    ring.rotation.x = -Math.PI/2;
+    ring.position.copy(position); ring.position.y = 0.12;
+    scene.add(ring);
+    activeFX.push({ type:'ring', obj:ring, life:0, maxLife:0.55, maxR:maxR||10 });
+  }
+  function updateFX(dt){
+    for (var i=activeFX.length-1;i>=0;i--){
+      var fx = activeFX[i];
+      fx.life += dt;
+      var t = fx.life/fx.maxLife;
+      if (fx.type==='burst'){
+        var arr = fx.obj.geometry.attributes.position.array;
+        for (var j=0;j<fx.vel.length;j++){
+          arr[j*3]   += fx.vel[j].x*dt;
+          arr[j*3+1] += (fx.vel[j].y - 6*fx.life)*dt;
+          arr[j*3+2] += fx.vel[j].z*dt;
+        }
+        fx.obj.geometry.attributes.position.needsUpdate = true;
+        fx.obj.material.opacity = Math.max(0,1-t);
+      } else if (fx.type==='tracer'){
+        fx.obj.material.opacity = Math.max(0,0.95*(1-t));
+      } else if (fx.type==='ring'){
+        var r = 0.3 + fx.maxR*t;
+        fx.obj.geometry.dispose();
+        fx.obj.geometry = new THREE.RingGeometry(Math.max(0,r-0.4), r, 48);
+        fx.obj.material.opacity = 0.85*(1-t);
+      }
+      if (t >= 1){
+        scene.remove(fx.obj); fx.obj.geometry.dispose(); fx.obj.material.dispose();
+        activeFX.splice(i,1);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------- input & camera
+  // NOTE: this page can run embedded in a sandboxed iframe (e.g. a published
+  // Artifact) where the Pointer Lock API is silently refused — requestPointerLock()
+  // never rejects loudly, it just never fires 'pointerlockchange', which used to
+  // leave turning and firing permanently gated behind a lock that never happened.
+  // Everything below now works with or without pointer lock ever engaging.
+  var keys = {};
+  var locked = false, paused = false, started = false;
+  var matchOver = false;
+
+  // ---------------------------------------------------------------- mobile / touch
+  var IS_TOUCH = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  var touchMoveX = 0, touchMoveY = 0; // -1..1, drives forwardIn/strafeIn alongside WASD
+  var touchLookX = 0, touchLookY = 0; // -1..1, drives camera turn alongside the mouse-edge fallback
+  if (IS_TOUCH){
+    document.body.classList.add('touch-device');
+    document.getElementById('mobileControls').classList.remove('hidden');
+    var rotatePromptEl = document.getElementById('rotatePrompt');
+    function checkOrientation(){
+      rotatePromptEl.classList.toggle('show', window.innerHeight > window.innerWidth);
+    }
+    checkOrientation();
+    window.addEventListener('resize', checkOrientation);
+    window.addEventListener('orientationchange', checkOrientation);
+  }
+  // a drag-anywhere virtual stick: touching down anywhere inside `zoneEl`
+  // re-centers the stick under the thumb (rather than requiring a precise
+  // first touch on a fixed-position knob), then reports -1..1 offsets from
+  // that point until release. Independent touch identifiers per zone so the
+  // move stick, look stick and fire button can all be held at once.
+  function setupJoystick(zoneEl, knobEl, onChange, maxRadius){
+    var touchId = null, cx = 0, cy = 0;
+    function start(t){
+      var r = zoneEl.getBoundingClientRect();
+      touchId = t.identifier;
+      cx = t.clientX; cy = t.clientY;
+      zoneEl.classList.add('active');
+    }
+    function move(t){
+      var dx = t.clientX - cx, dy = t.clientY - cy;
+      var d = Math.sqrt(dx*dx + dy*dy);
+      if (d > maxRadius){ dx = dx/d*maxRadius; dy = dy/d*maxRadius; }
+      knobEl.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      onChange(dx/maxRadius, dy/maxRadius);
+    }
+    function end(){
+      touchId = null;
+      zoneEl.classList.remove('active');
+      knobEl.style.transform = '';
+      onChange(0, 0);
+    }
+    zoneEl.addEventListener('touchstart', function(e){ e.preventDefault(); if (touchId===null) start(e.changedTouches[0]); }, { passive:false });
+    zoneEl.addEventListener('touchmove', function(e){
+      e.preventDefault();
+      for (var i=0;i<e.changedTouches.length;i++){ if (e.changedTouches[i].identifier===touchId) move(e.changedTouches[i]); }
+    }, { passive:false });
+    function onEnd(e){
+      for (var i=0;i<e.changedTouches.length;i++){ if (e.changedTouches[i].identifier===touchId) end(); }
+    }
+    zoneEl.addEventListener('touchend', onEnd);
+    zoneEl.addEventListener('touchcancel', onEnd);
+  }
+  if (IS_TOUCH){
+    setupJoystick(document.getElementById('joyMove'), document.querySelector('#joyMove .joyKnob'), function(x,y){ touchMoveX = x; touchMoveY = y; }, 45);
+    setupJoystick(document.getElementById('joyLook'), document.querySelector('#joyLook .joyKnob'), function(x,y){ touchLookX = x; touchLookY = y; }, 45);
+    function tapHold(id, onDown, onUp){
+      var el = document.getElementById(id);
+      el.addEventListener('touchstart', function(e){ e.preventDefault(); onDown(); }, { passive:false });
+      if (onUp){ el.addEventListener('touchend', function(e){ e.preventDefault(); onUp(); }, { passive:false }); el.addEventListener('touchcancel', onUp); }
+    }
+    tapHold('btnFire', function(){ mouseDown = true; }, function(){ mouseDown = false; });
+    tapHold('btnJump', function(){ keys['Space'] = true; }, function(){ keys['Space'] = false; });
+    tapHold('btnReload', function(){ tryReload(); });
+    tapHold('btnUlt', function(){ tryUltimate(); });
+    tapHold('ab-dash', function(){ tryDash(); });
+    tapHold('ab-nova', function(){ tryNova(); });
+    tapHold('ab-surge', function(){ trySurge(); });
+  }
+
+  // two 3v3 modes share one match clock/HUD bar:
+  //  - Team Deathmatch: first squad to TEAM_KILL_LIMIT kills wins (or whoever
+  //    is ahead when the clock runs out).
+  //  - Capture Objective (rooftop only): a tug-of-war on the existing central
+  //    platform -- CONTROL_POINT.progress runs -100 (Bravo owns it) to +100
+  //    (Alpha owns it). Whichever team alone holds the ring pushes progress
+  //    toward their side; both teams present freezes it as contested.
+  // radius is generous on purpose: the platform itself is a solid obstacle
+  // (see collideAndSlide) that keeps ground-level movement from ever getting
+  // closer than ~4.9 units to its center, so the capture ring has to reach
+  // out past that collision radius to be reachable at all -- this is "stand
+  // around the beacon platform," not "stand inside it."
+  var CONTROL_POINT = { pos: new THREE.Vector3(0,0,0), radius: 7.5, progress: 0 };
+  var ROUND_TIME = 300; // 5:00
+  var matchTimer = ROUND_TIME;
+  var objBarEl = document.getElementById('objectiveBar');
+  var objFillEl = document.getElementById('objFill');
+  var objStatusEl = document.getElementById('objStatus');
+  var objTimerEl = document.getElementById('objTimer');
+  var matchEndEl = document.getElementById('matchEndScreen');
+
+  function formatClock(s){
+    s = Math.max(0, s);
+    var m = Math.floor(s/60), sec = Math.floor(s%60);
+    return m + ':' + (sec<10?'0':'') + sec;
+  }
+
+  function teamCountNear(pos, radius, team){
+    var n = 0;
+    if (player.alive && player.team === team && player.group.position.distanceTo(pos) < radius) n++;
+    bots.forEach(function(b){ if (b.alive && b.team === team && b.pos.distanceTo(pos) < radius) n++; });
+    Object.keys(netPeers).forEach(function(label){
+      var entry = netPeers[label], pres = entry.lastPresence;
+      if (pres && pres.level === currentLevel && pres.alive !== false && (pres.team||'A') === team && entry.combatant.pos.distanceTo(pos) < radius) n++;
+    });
+    return n;
+  }
+
+  function checkTDMEnd(){
+    if (matchOver || currentMode !== 'tdm') return;
+    if (teamScore.A >= TEAM_KILL_LIMIT) endMatch('A');
+    else if (teamScore.B >= TEAM_KILL_LIMIT) endMatch('B');
+  }
+
+  function updateMatch(dt){
+    if (matchOver) return;
+    if (pvpWaitTagEl){
+      var enemyTeam = player.team === 'A' ? 'B' : 'A';
+      var waiting = currentArenaMode === 'pvp' && countPeersOnTeam(enemyTeam) === 0 && bots.length === 0;
+      pvpWaitTagEl.classList.toggle('hidden', !waiting);
+    }
+    matchTimer -= dt;
+    if (currentMode === 'objective'){
+      var teamAIn = teamCountNear(CONTROL_POINT.pos, CONTROL_POINT.radius, 'A');
+      var teamBIn = teamCountNear(CONTROL_POINT.pos, CONTROL_POINT.radius, 'B');
+      var CAP_RATE = 100/9; // ~9s to fully swing when uncontested
+      var status = 'HOLD THE POINT', contested = false;
+      if (teamAIn > 0 && teamBIn === 0){ CONTROL_POINT.progress = Math.min(100, CONTROL_POINT.progress + CAP_RATE*dt); status = 'ALPHA CAPTURING'; }
+      else if (teamBIn > 0 && teamAIn === 0){ CONTROL_POINT.progress = Math.max(-100, CONTROL_POINT.progress - CAP_RATE*dt); status = 'BRAVO CAPTURING'; }
+      else if (teamAIn > 0 && teamBIn > 0){ status = 'CONTESTED'; contested = true; }
+      objFillEl.style.width = ((CONTROL_POINT.progress+100)/2) + '%';
+      objFillEl.classList.toggle('contested', contested);
+      objStatusEl.textContent = status;
+      objTimerEl.textContent = formatClock(matchTimer);
+      if (CONTROL_POINT.progress >= 100) endMatch('A');
+      else if (CONTROL_POINT.progress <= -100) endMatch('B');
+      else if (matchTimer <= 0) endMatch(CONTROL_POINT.progress===0 ? null : (CONTROL_POINT.progress>0?'A':'B'));
+    } else {
+      objStatusEl.textContent = 'ALPHA ' + (teamScore.A||0) + '  —  ' + (teamScore.B||0) + ' BRAVO';
+      objFillEl.style.width = Math.max(0, Math.min(100, 50 + (teamScore.A-teamScore.B)/TEAM_KILL_LIMIT*50)) + '%';
+      objFillEl.classList.remove('contested');
+      objTimerEl.textContent = formatClock(matchTimer);
+      if (matchTimer <= 0) endMatch(teamScore.A===teamScore.B ? null : (teamScore.A>teamScore.B?'A':'B'));
+    }
+  }
+
+  function endMatch(winnerTeam){
+    matchOver = true;
+    // Practice (vs bots) has no server involved, so it can't touch your
+    // account -- only Multiplayer Arena matches are scored server-side
+    // (see arena.js's own endMatch, which is what actually writes to the
+    // database); refetch here just pulls the now-updated numbers down.
+    if (currentArenaMode === 'pvp') refreshMe();
+    document.exitPointerLock && document.exitPointerLock();
+    var titleEl = document.getElementById('matchEndTitle'), ledeEl = document.getElementById('matchEndLede');
+    if (winnerTeam === null || winnerTeam === undefined){
+      titleEl.textContent = 'TIME EXPIRED — DRAW';
+      ledeEl.textContent = 'Neither squad secured the win before the clock ran out.';
+    } else {
+      var youWon = winnerTeam === player.team;
+      var teamName = (TEAM_COLORS[winnerTeam]||{}).name || winnerTeam;
+      titleEl.textContent = youWon
+        ? (currentMode === 'objective' ? 'OBJECTIVE SECURED' : 'VICTORY')
+        : (currentMode === 'objective' ? 'OBJECTIVE LOST' : 'DEFEAT');
+      ledeEl.textContent = 'TEAM ' + teamName + (youWon ? ' wins. Contract complete.' : ' takes the win.');
+    }
+    matchEndEl.classList.remove('hidden');
+  }
+
+  function resetMatch(){
+    matchEndEl.classList.add('hidden');
+    if (currentArenaMode === 'pvp') return; // teamScore/matchOver belong to the server in PvP -- see handleArenaMessage
+    matchOver = false;
+    CONTROL_POINT.progress = 0;
+    teamScore = { A:0, B:0 };
+    matchTimer = ROUND_TIME;
+    objTimerEl.textContent = formatClock(ROUND_TIME);
+  }
+  var pointerLockAvailable = 'pointerLockElement' in document;
+  var menuEl = document.getElementById('menu');
+  var pauseEl = document.getElementById('pauseScreen');
+  var deathEl = document.getElementById('deathScreen');
+  var hudEl = document.getElementById('hud');
+
+  // ================================================================== login / profile
+  // Real accounts now: username + bcrypt-hashed password live in the
+  // Postgres database behind this server, and a signed JWT (30-day expiry)
+  // is what proves who you are on every API call and every WebSocket
+  // connection to the live arena. The token is cached in localStorage only
+  // so you don't have to sign in again on every visit -- the server, not
+  // the browser, is the source of truth for the account and its stats.
+  var loginEl = document.getElementById('loginScreen');
+  var authUsernameEl = document.getElementById('authUsername');
+  var authPasswordEl = document.getElementById('authPassword');
+  var loginErrorEl = document.getElementById('loginError');
+  var loginLedeEl = document.getElementById('loginLede');
+  var profileCallsignEl = document.getElementById('profileCallsign');
+  var profileStatsEl = document.getElementById('profileStats');
+  var onlineCountMenuEl = document.getElementById('onlineCountMenu');
+  var AUTH_TOKEN_KEY = 'mercProtocolToken_v2';
+  var authTab = 'login'; // 'login' | 'register'
+  var authToken = null;
+  var callsign = ''; // the signed-in username, used as the display name everywhere below
+  var careerStats = { wins:0, losses:0, kills:0, matches:0, deaths:0 };
+  try { authToken = localStorage.getItem(AUTH_TOKEN_KEY) || null; } catch(e){}
+
+  function refreshProfileBar(){
+    if (profileCallsignEl) profileCallsignEl.textContent = callsign || '—';
+    if (profileStatsEl) profileStatsEl.textContent = careerStats.wins + 'W / ' + careerStats.losses + 'L / ' + careerStats.kills + ' KILLS';
+  }
+  function showMenu(){
+    loginEl.classList.add('hidden');
+    menuEl.classList.remove('hidden');
+    refreshProfileBar();
+  }
+  function showLogin(){
+    menuEl.classList.add('hidden');
+    loginEl.classList.remove('hidden');
+    if (authUsernameEl) setTimeout(function(){ authUsernameEl.focus(); }, 50);
+  }
+  function signOut(){
+    if (typeof disconnectArena === 'function') disconnectArena();
+    authToken = null; callsign = '';
+    try { localStorage.removeItem(AUTH_TOKEN_KEY); } catch(e){}
+    showLogin();
+  }
+  document.querySelectorAll('#authTabs .level-opt').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      authTab = btn.getAttribute('data-authtab');
+      document.querySelectorAll('#authTabs .level-opt').forEach(function(b){ b.classList.toggle('active', b===btn); });
+      document.getElementById('loginBtn').textContent = authTab === 'register' ? 'CREATE ACCOUNT' : 'SIGN IN';
+      loginLedeEl.textContent = authTab === 'register'
+        ? 'Pick a username (3-16 letters/digits/_/-) and a password (6+ characters). This is a real account on this server.'
+        : 'Sign in with your operator account to deploy. New here? Switch to Register above.';
+      loginErrorEl.textContent = '';
+    });
+  });
+
+  // Pulls your live stats from the server (source of truth) and updates the
+  // profile bar; also used right after sign-in and after every match ends.
+  function refreshMe(){
+    if (!authToken) return;
+    fetch('/api/me', { headers: { Authorization: 'Bearer ' + authToken } })
+      .then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function(d){
+        callsign = d.username;
+        careerStats = { wins:d.stats.wins||0, losses:d.stats.losses||0, kills:d.stats.kills||0, deaths:d.stats.deaths||0, matches:d.stats.matches||0 };
+        refreshProfileBar();
+      })
+      .catch(function(status){
+        if (status === 401) signOut(); // token expired/invalid -- back to the login screen
+      });
+  }
+
+  function submitAuth(){
+    var username = (authUsernameEl.value || '').trim();
+    var password = authPasswordEl.value || '';
+    if (!username || !password){ loginErrorEl.textContent = 'ENTER A USERNAME AND PASSWORD'; return; }
+    loginErrorEl.textContent = '';
+    var endpoint = authTab === 'register' ? '/api/register' : '/api/login';
+    fetch(endpoint, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username, password: password })
+    })
+      .then(function(r){ return r.json().then(function(d){ return { ok:r.ok, d:d }; }); })
+      .then(function(res){
+        if (!res.ok){ loginErrorEl.textContent = (res.d && res.d.error ? res.d.error.toUpperCase() : 'SIGN-IN FAILED'); return; }
+        authToken = res.d.token; callsign = res.d.username;
+        try { localStorage.setItem(AUTH_TOKEN_KEY, authToken); } catch(e){}
+        authPasswordEl.value = '';
+        showMenu();
+        refreshMe();
+      })
+      .catch(function(){ loginErrorEl.textContent = 'COULD NOT REACH THE SERVER'; });
+  }
+  document.getElementById('loginBtn').addEventListener('click', submitAuth);
+  [authUsernameEl, authPasswordEl].forEach(function(el){
+    if (el) el.addEventListener('keydown', function(e){ if (e.code === 'Enter') submitAuth(); });
+  });
+  document.getElementById('switchCallsignBtn').addEventListener('click', signOut);
+
+  if (authToken){ showMenu(); refreshMe(); } else { showLogin(); }
+
+  // ================================================================== arena mode (bots vs live PvP)
+  var currentArenaMode = 'pve'; // 'pve' (bots fill every seat) | 'pvp' (live players only, no bots)
+  var pvpWaitTagEl = document.getElementById('pvpWaitTag');
+  var ARENA_BLURBS = {
+    pve: 'Bots fill every open seat on both squads — good for warming up or playing solo.',
+    pvp: 'No bots: every seat is a real operator currently viewing this arena. Solo visitors wait in the arena until an opponent joins.'
+  };
+  // Multiplayer Arena is scoped to Team Deathmatch on Rooftop only for now --
+  // Capture Objective's capture-point logic lives entirely client-side today
+  // and has no server-authoritative equivalent yet, and locking everyone to
+  // one map keeps peers from ending up alone in three different scenes.
+  // refreshSelectionLocks() is the single place that reconciles both locks
+  // whenever either the arena mode or the match mode changes.
+  function refreshSelectionLocks(){
+    var lockToRooftop = currentMode === 'objective' || currentArenaMode === 'pvp';
+    document.querySelectorAll('#levelSelect .level-opt').forEach(function(b){
+      var isRooftop = b.getAttribute('data-level') === 'rooftop';
+      b.disabled = lockToRooftop && !isRooftop;
+      b.classList.toggle('locked', lockToRooftop && !isRooftop);
+      if (lockToRooftop && isRooftop) b.click();
+    });
+    document.querySelectorAll('#modeSelect .level-opt').forEach(function(b){
+      var isTdm = b.getAttribute('data-mode') === 'tdm';
+      b.disabled = currentArenaMode === 'pvp' && !isTdm;
+      b.classList.toggle('locked', currentArenaMode === 'pvp' && !isTdm);
+      if (currentArenaMode === 'pvp' && isTdm) b.click();
+    });
+  }
+  document.querySelectorAll('#arenaSelect .level-opt').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      currentArenaMode = btn.getAttribute('data-arena');
+      document.querySelectorAll('#arenaSelect .level-opt').forEach(function(b){ b.classList.toggle('active', b===btn); });
+      var blurbEl = document.getElementById('arenaBlurb');
+      if (blurbEl) blurbEl.textContent = ARENA_BLURBS[currentArenaMode] || '';
+      document.getElementById('deployBtn').textContent = currentArenaMode === 'pvp' ? 'JOIN ARENA' : 'DEPLOY';
+      refreshSelectionLocks();
+    });
+  });
+
+  var camYaw = Math.PI, camPitch = -0.12;
+  var viewYaw = camYaw, viewPitch = camPitch; // smoothed render values (see updateCamera)
+  var camRecoilKick = 0; // decaying additive kick from firing, on top of viewPitch
+  var camDist = 4.2, camHeight = 1.55, camShoulder = 0.55;
+  var camDistSmoothed = camDist;
+  var firstPerson = false;
+  var fpvBlend = 0; // eased 0..1 so the P toggle transitions smoothly instead of popping
+
+  function toggleFirstPerson(){
+    firstPerson = !firstPerson;
+  }
+  var mouseDown = false;
+  var mouseClientX = window.innerWidth/2, mouseClientY = window.innerHeight/2;
+  var mouseInWindow = false;
+
+  function setPaused(p){
+    paused = p;
+    pauseEl.classList.toggle('hidden', !paused || !player.alive);
+  }
+
+  function tryEngagePointerLock(){
+    if (!pointerLockAvailable || IS_TOUCH) return;
+    try {
+      var p = canvas.requestPointerLock();
+      if (p && typeof p.catch === 'function') p.catch(function(){ /* refused by the host — fallback controls keep working */ });
+    } catch(e){ /* ignore — fallback controls keep working */ }
+  }
+
+  document.addEventListener('keydown', function(e){
+    keys[e.code] = true;
+    if (e.code === 'KeyR') tryUltimate();
+    if (e.code === 'KeyV') tryReload();
+    if (e.code === 'KeyQ') tryNova();
+    if (e.code === 'KeyE') tryDash();
+    if (e.code === 'KeyF') trySurge();
+    if (e.code === 'KeyP' && started && player.alive) toggleFirstPerson();
+    if (e.code === 'Escape' && started && player.alive) setPaused(!paused);
+    if (e.code === 'Tab' && started){
+      e.preventDefault();
+      if (!fullScoreboardEl.classList.contains('hidden')) return;
+      refreshFullScoreboard();
+      fullScoreboardEl.classList.remove('hidden');
+    }
+  });
+  document.addEventListener('keyup', function(e){
+    keys[e.code] = false;
+    if (e.code === 'Tab') fullScoreboardEl.classList.add('hidden');
+  });
+
+  var fullScoreboardEl = document.getElementById('fullScoreboard');
+  var fsbRowsEl = document.getElementById('fsbRows');
+  function refreshFullScoreboard(){
+    var rows = [{ name:(callsign||'YOU'), team:player.team, kills:player.kills, deaths:player.deaths, dead:!player.alive, you:true }];
+    bots.forEach(function(b){ rows.push({ name:b.name, team:b.team, kills:b.kills||0, deaths:b.deaths||0, dead:!b.alive, you:false }); });
+    Object.keys(netPeers).forEach(function(label){
+      var pres = netPeers[label].lastPresence;
+      if (pres) rows.push({ name:pres.name||'RIVAL', team:pres.team||'A', kills:0, deaths:0, dead:pres.alive===false, you:false });
+    });
+    rows.sort(function(a,b){ if (a.team !== b.team) return a.team < b.team ? -1 : 1; return b.kills - a.kills; });
+    fsbRowsEl.innerHTML = rows.map(function(r){
+      var cls = 'fsb-row' + (r.you?' fsb-you':'') + (r.dead?' fsb-dead':'');
+      return '<div class="'+cls+'"><span>['+r.team+'] '+r.name+(r.dead?' (down)':'')+'</span><span>'+r.kills+'</span><span>'+r.deaths+'</span></div>';
+    }).join('');
+  }
+
+  // level select: two toggle buttons on the menu drive `currentLevel`; applied
+  // (colliders swapped, level group visibility toggled, player/bots repositioned)
+  // once at deploy time so the level never changes mid-match.
+  var ROOFTOP_FOG_COLOR = 0x170308, UNDERGRID_FOG_COLOR = 0x040e12;
+  function applyLevelSelection(){
+    rooftopGroup.visible = false;
+    facilityGroup.visible = false;
+    undergridGroup.visible = false;
+    scene.fog.color.setHex(ROOFTOP_FOG_COLOR);
+    if (currentLevel === 'facility'){
+      colliders = facilityColliders;
+      facilityGroup.visible = true;
+      randomSpawn = randomSpawnFacility;
+      player.group.position.copy(FACILITY_PLAYER_SPAWN);
+    } else if (currentLevel === 'undergrid'){
+      colliders = undergridColliders;
+      undergridGroup.visible = true;
+      randomSpawn = randomSpawnUndergrid;
+      player.group.position.copy(UNDERGRID_PLAYER_SPAWN);
+      scene.fog.color.setHex(UNDERGRID_FOG_COLOR);
+    } else {
+      colliders = rooftopColliders;
+      rooftopGroup.visible = true;
+      randomSpawn = randomSpawnRooftop;
+      player.group.position.set(0, 0, 10);
+    }
+    player.group.position.y = 0;
+    // bot roster (count/team/positions) is rebuilt fresh by setupBots(),
+    // called right after this from the deploy handler now that randomSpawn
+    // points at the correct level's spawn function.
+    envMeshesCache = null; // level geometry visibility changed -- rebuild the camera-collision mesh cache
+    resetMatch();
+    objBarEl.classList.remove('hidden'); // both modes show the team score / objective bar now
+  }
+  document.querySelectorAll('#levelSelect .level-opt').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if (btn.disabled) return;
+      currentLevel = btn.getAttribute('data-level');
+      document.querySelectorAll('#levelSelect .level-opt').forEach(function(b){ b.classList.toggle('active', b===btn); });
+    });
+  });
+
+  var heroBlurbEl = document.getElementById('heroBlurb');
+  document.querySelectorAll('#heroSelect .level-opt').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      currentHero = btn.getAttribute('data-hero');
+      document.querySelectorAll('#heroSelect .level-opt').forEach(function(b){ b.classList.toggle('active', b===btn); });
+      if (heroBlurbEl) heroBlurbEl.textContent = (HEROES[currentHero] || HEROES.vanguard).blurb;
+    });
+  });
+
+  // Capture Objective only exists on the Rooftop map (it's the only level
+  // with the central platform prop) -- picking that mode locks the level
+  // select to Rooftop; Team Deathmatch works on all three maps.
+  document.querySelectorAll('#modeSelect .level-opt').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      if (btn.disabled) return;
+      currentMode = btn.getAttribute('data-mode');
+      document.querySelectorAll('#modeSelect .level-opt').forEach(function(b){ b.classList.toggle('active', b===btn); });
+      refreshSelectionLocks();
+    });
+  });
+
+  function beginMatch(){
+    applyLevelSelection();
+    setupBots();
+    started = true;
+    menuEl.classList.add('hidden');
+    hudEl.classList.remove('hidden');
+    setPaused(false);
+    tryEngagePointerLock();
+  }
+  var deployBtnEl = document.getElementById('deployBtn');
+  document.getElementById('deployBtn').addEventListener('click', function(){
+    applyHeroSelection();
+    if (currentArenaMode === 'pvp'){
+      deployBtnEl.disabled = true; deployBtnEl.textContent = 'CONNECTING…';
+      connectArena(function(){
+        deployBtnEl.disabled = false; deployBtnEl.textContent = 'JOIN ARENA';
+        beginMatch();
+      }, function(reason){
+        deployBtnEl.disabled = false; deployBtnEl.textContent = 'JOIN ARENA';
+        loginErrorEl.textContent = ''; // in case it's stale from a previous screen
+        alert('Could not join the Multiplayer Arena: ' + reason + '. Practice mode still works offline.');
+      });
+    } else {
+      disconnectArena();
+      assignTeams();
+      beginMatch();
+    }
+  });
+  document.getElementById('resumeBtn').addEventListener('click', function(){
+    setPaused(false);
+    tryEngagePointerLock();
+  });
+  document.getElementById('rematchBtn').addEventListener('click', function(){
+    if (currentArenaMode !== 'pvp') assignTeams();
+    applyLevelSelection();
+    setupBots();
+    player.hp = player.maxHp; player.ammo = player.maxAmmo; player.reloadT = -1;
+    player.alive = true; player.state = 'idle'; player.kills = 0; player.deaths = 0; player.streak = 0;
+    document.getElementById('killsNum').textContent = 0;
+    document.getElementById('deathsNum').textContent = 0;
+    document.getElementById('streakNum').textContent = 0;
+    setPaused(false);
+    tryEngagePointerLock();
+  });
+
+  document.addEventListener('pointerlockchange', function(){
+    locked = (document.pointerLockElement === canvas || document.pointerLockElement === document.body);
+  });
+  canvas.addEventListener('click', function(){
+    if (started && !paused && player.alive) tryEngagePointerLock();
+  });
+
+  document.addEventListener('mousemove', function(e){
+    mouseClientX = e.clientX; mouseClientY = e.clientY; mouseInWindow = true;
+    if (!started || paused) return;
+    var sens = SETTINGS.sens;
+    if (locked){
+      // precise FPS-style deltas when the host actually grants pointer lock
+      camYaw -= e.movementX*sens;
+      camPitch -= e.movementY*sens;
+      camPitch = Math.max(-1.15, Math.min(0.95, camPitch));
+    }
+  });
+  document.addEventListener('mouseleave', function(){ mouseInWindow = false; });
+
+  // fallback steering: when pointer lock isn't active (or never engages), aim by
+  // cursor position relative to screen centre — always works, no lock required,
+  // and still gives full unlimited 360° turning if you hold the cursor at an edge
+  function applyFallbackSteering(dt){
+    var ax = 0, ay = 0;
+    if (!locked && mouseInWindow){
+      var cx = window.innerWidth/2, cy = window.innerHeight/2;
+      var dx = (mouseClientX - cx)/cx;   // -1..1
+      var dy = (mouseClientY - cy)/cy;   // -1..1
+      var dead = 0.08;
+      ax = Math.abs(dx) < dead ? 0 : (dx - Math.sign(dx)*dead)/(1-dead);
+      ay = Math.abs(dy) < dead ? 0 : (dy - Math.sign(dy)*dead)/(1-dead);
+    }
+    // the look joystick adds in on top of (never instead of) the mouse-edge
+    // fallback -- on touch devices mouseInWindow just never goes true, so
+    // this is the only contribution there
+    if (touchLookX || touchLookY){
+      ax = Math.max(-1, Math.min(1, ax + touchLookX));
+      ay = Math.max(-1, Math.min(1, ay + touchLookY));
+    }
+    if (locked || (ax===0 && ay===0)) return;
+    var maxYawRate = 2.6, maxPitchRate = 1.8;
+    camYaw -= ax*Math.abs(ax)*maxYawRate*dt;
+    camPitch -= ay*Math.abs(ay)*maxPitchRate*dt;
+    camPitch = Math.max(-1.15, Math.min(0.95, camPitch));
+  }
+
+  document.addEventListener('mousedown', function(e){ if (e.button===0) mouseDown = true; });
+  document.addEventListener('mouseup', function(e){ if (e.button===0) mouseDown = false; });
+  // a touch/click also fires immediately so tapping to aim-and-shoot works without
+  // ever needing pointer lock at all
+  canvas.addEventListener('mousedown', function(e){
+    if (e.button===0 && started && !paused && player.alive) mouseDown = true;
+  });
+
+  var raycaster = new THREE.Raycaster();
+
+  function updateCamera(dt){
+    // the raw camYaw/camPitch are the input target; viewYaw/viewPitch ease toward
+    // them so mouse movement (locked deltas or the fallback edge-steering) reads
+    // as a smooth, weighted camera swing instead of an instant snap
+    var followRate = locked ? 26 : 14;
+    var ease = 1 - Math.exp(-followRate*dt);
+    viewYaw += (camYaw - viewYaw)*ease;
+    viewPitch += (camPitch - viewPitch)*ease;
+
+    // a brief additive kick from firing, decaying back to zero on its own
+    camRecoilKick *= Math.max(0, 1 - dt*9);
+
+    var euler = new THREE.Euler(viewPitch - camRecoilKick, viewYaw, 0, 'YXZ');
+    var q = new THREE.Quaternion().setFromEuler(euler);
+    var forward = new THREE.Vector3(0,0,-1).applyQuaternion(q);
+    var right = new THREE.Vector3(1,0,0).applyQuaternion(q);
+
+    var fpvTarget = firstPerson ? 1 : 0;
+    fpvBlend += (fpvTarget - fpvBlend) * Math.min(1, 1 - Math.exp(-14*dt));
+
+    var focus = player.group.position.clone().add(new THREE.Vector3(0, camHeight, 0));
+    var eyePos = player.group.position.clone().add(new THREE.Vector3(0, camHeight + 0.14, 0)).addScaledVector(forward, 0.18);
+    var desired = focus.clone().addScaledVector(forward, -camDist).addScaledVector(right, camShoulder);
+
+    // camera collision: keep camera from clipping through geometry (third-person only --
+    // the first-person eye position sits inside the collision radius already)
+    var toCam = desired.clone().sub(focus);
+    var targetDist = toCam.length();
+    raycaster.set(focus, toCam.clone().normalize());
+    raycaster.far = targetDist;
+    var hits = raycaster.intersectObjects(getEnvMeshes(), false);
+    if (hits.length){ targetDist = Math.max(0.6, hits[0].distance*0.92); }
+    var distEase = targetDist < camDistSmoothed ? 1 : Math.min(1, 1 - Math.exp(-18*dt));
+    camDistSmoothed += (targetDist - camDistSmoothed)*distEase;
+    var thirdPos = focus.clone().addScaledVector(toCam.normalize(), camDistSmoothed);
+
+    var camPos = thirdPos.clone().lerp(eyePos, fpvBlend);
+
+    camera.position.copy(camPos);
+    camera.quaternion.copy(q);
+    // hide the body once the view has swung mostly into first-person so we never
+    // see the inside of our own head, but keep it visible through most of the
+    // transition and whenever the player is dead (death cam always shows the body)
+    var showFPV = fpvBlend >= 0.5 && player.state !== 'dead';
+    if (player.root) player.root.visible = !showFPV;
+    if (viewGun){
+      viewGun.visible = showFPV;
+      if (showFPV){
+        var moveBob = Math.min(1, moveVel.length()/4) ;
+        var swayT = performance.now()*0.001;
+        viewGun.position.x = 0.24 + Math.sin(swayT*2.2)*0.008*moveBob;
+        viewGun.position.y = -0.22 + Math.abs(Math.sin(swayT*4.4))*0.01*moveBob + camRecoilKick*1.4;
+      }
+    }
+
+    // character always faces the aim/camera direction
+    player.group.rotation.y = viewYaw + Math.PI;
+
+    return { forward: forward, right: right, focus: focus, yaw: viewYaw };
+  }
+
+  // ---------------------------------------------------------------- combat
+  function tryReload(){
+    if (!player.alive || player.reloadT >= 0 || player.ammo === player.maxAmmo) return;
+    player.reloadT = 0;
+  }
+
+  var muzzleFlashLight = new THREE.PointLight(0xffffff, 0, 6, 2);
+  scene.add(muzzleFlashLight);
+
+  function fireWeapon(camInfo){
+    if (!player.alive || player.reloadT >= 0 || player.fireCooldown > 0) return;
+    if (player.ammo <= 0){ tryReload(); return; }
+    player.ammo--; player.fireCooldown = 0.13;
+    player.recoil = 1.0;
+    muzzleFlashLight.intensity = 4;
+    camRecoilKick = Math.min(0.05, camRecoilKick + 0.016);
+
+    raycaster.set(camera.position, camInfo.forward);
+    raycaster.far = 100;
+    var hitMeshes = [];
+    bots.forEach(function(b){ if (b.alive && b.team !== player.team) b.root.traverse(function(o){ if (o.isMesh){ o.userData.bot = b; o.userData.netTargetId = null; hitMeshes.push(o); } }); });
+    Object.keys(netPeers).forEach(function(label){
+      var entry = netPeers[label];
+      var pres = entry.lastPresence;
+      if (!pres || pres.level !== currentLevel || pres.alive === false || !pres.id) return;
+      if ((pres.team||'A') === player.team) return; // no friendly fire
+      entry.combatant.root.traverse(function(o){ if (o.isMesh){ o.userData.bot = null; o.userData.netTargetId = pres.id; o.userData.netHead = entry.combatant.headBone; hitMeshes.push(o); } });
+    });
+    var hits = raycaster.intersectObjects(hitMeshes, false);
+    var muzzleWorld = new THREE.Vector3(); player.muzzle.getWorldPosition(muzzleWorld);
+    var end;
+    if (hits.length && hits[0].object.userData.netTargetId){
+      var hit0 = hits[0];
+      end = hit0.point;
+      var headshotNet = hit0.object === hit0.object.userData.netHead || (hit0.object.name && hit0.object.name.toLowerCase().indexOf('head')!==-1);
+      damagePeer(hit0.object.userData.netTargetId, headshotNet?46:20, headshotNet);
+      showHitmarker();
+    } else if (hits.length){
+      var hit = hits[0];
+      end = hit.point;
+      var bot = hit.object.userData.bot;
+      var headshot = hit.object === bot.headBone || (hit.object.name && hit.object.name.toLowerCase().indexOf('head')!==-1);
+      damageBot(bot, headshot?46:20, headshot, player);
+      showHitmarker();
+    } else {
+      var envHits = raycaster.intersectObjects(getEnvMeshes(), false);
+      end = envHits.length ? envHits[0].point : camera.position.clone().addScaledVector(camInfo.forward, 90);
+    }
+    spawnTracer(muzzleWorld, end, 0xffffff);
+  }
+
+  function damageBot(bot, dmg, headshot, attacker){
+    if (!bot.alive) return;
+    bot.hp -= dmg;
+    bot.hitFlinch = 1;
+    if (attacker === player && !player.flying) player.ultCharge = Math.min(100, player.ultCharge + dmg*0.7);
+    drawBotBar(bot);
+    var wp = new THREE.Vector3(); (bot.headBone||bot.root).getWorldPosition(wp);
+    spawnBurst(wp, headshot?0xffffff:0xff8f8f, headshot?18:10);
+    if (bot.hp <= 0) killBot(bot, attacker);
+  }
+
+  function killBot(bot, attacker){
+    bot.alive = false;
+    bot.state = 'dead';
+    bot.deathT = 0;
+    var wp = new THREE.Vector3(); bot.group.getWorldPosition(wp);
+    spawnBurst(wp.setY(1.0), 0xff3b3b, 36);
+    bot.respawnT = 4 + Math.random()*2;
+    bot.deaths++;
+    var killerTeam = null;
+    if (attacker === player){
+      player.kills++; player.streak++;
+      player.ultCharge = Math.min(100, player.ultCharge + 12);
+      addKillFeed(bot.name, true);
+      document.getElementById('killsNum').textContent = player.kills;
+      document.getElementById('streakNum').textContent = player.streak;
+      killerTeam = player.team;
+    } else if (attacker && attacker.isBot){
+      attacker.kills = (attacker.kills||0) + 1;
+      killerTeam = attacker.team;
+    }
+    if (currentMode === 'tdm' && killerTeam){
+      teamScore[killerTeam] = (teamScore[killerTeam]||0) + 1;
+      checkTDMEnd();
+    }
+  }
+
+  function respawnBot(bot){
+    bot.pos.copy(randomSpawn());
+    bot.group.position.copy(bot.pos);
+    bot.hp = bot.maxHp;
+    drawBotBar(bot);
+    bot.alive = true;
+    bot.state = 'patrol';
+    bot.target = randomSpawn();
+    bot.group.visible = true;
+    if (bot.gun) bot.gun.visible = true;
+    bot.root.rotation.x = 0;
+  }
+
+  function tryNova(){
+    if (!player.alive || player.cooldown.nova > 0) return;
+    player.cooldown.nova = ABILITY_MAX.nova;
+    var origin = player.group.position.clone(); origin.y = 0.1;
+    spawnRing(origin, 0xffffff, 12);
+    spawnRing(origin, 0xff1b34, 8);
+    bots.forEach(function(b){
+      if (!b.alive || b.team === player.team) return;
+      var d = b.pos.distanceTo(player.group.position);
+      if (d < player.novaRadius){
+        damageBot(b, player.novaDmg, false, player);
+        if (b.alive){
+          var away = b.pos.clone().sub(player.group.position).normalize().multiplyScalar(6);
+          b.pos.add(away);
+        }
+      }
+    });
+  }
+
+  function tryDash(){
+    if (!player.alive || player.cooldown.dash > 0) return;
+    player.cooldown.dash = ABILITY_MAX.dash;
+    var camInfoNow = updateCamera(0);
+    var dir = camInfoNow.forward.clone(); dir.y = 0;
+    if (dir.lengthSq() < 0.0001) dir.set(0,0,-1); else dir.normalize();
+    var dashDist = player.dashDist;
+    var from = player.group.position.clone();
+    var dashRay = new THREE.Raycaster(from.clone().setY(0.6), dir, 0, dashDist + 0.6);
+    var hits = dashRay.intersectObjects(getEnvMeshes(), false);
+    if (hits.length) dashDist = Math.max(0.5, hits[0].distance - 0.6);
+    var to = from.clone().addScaledVector(dir, dashDist);
+    var mid = from.clone().lerp(to, 0.5); mid.y = 0.1;
+    spawnRing(mid, 0xffffff, 6);
+    player.group.position.x = to.x;
+    player.group.position.z = to.z;
+    moveVel.copy(dir).multiplyScalar(7.8);
+    player.dashTrailT = 0.22;
+    bots.forEach(function(b){
+      if (!b.alive || b.team === player.team) return;
+      var d = b.pos.distanceTo(to);
+      if (d < 2.5) damageBot(b, player.dashDmg, false, player);
+    });
+  }
+
+  function trySurge(){
+    if (!player.alive || player.cooldown.surge > 0) return;
+    player.cooldown.surge = ABILITY_MAX.surge;
+    player.hp = Math.min(player.maxHp, player.hp + player.surgeHeal);
+    var origin = player.group.position.clone(); origin.y = 0.1;
+    spawnRing(origin, 0xffffff, 10);
+    spawnRing(origin, 0xffd6d9, 6);
+  }
+
+  function damagePlayer(dmg, attacker){
+    if (!player.alive) return;
+    player.hp -= dmg;
+    player.hitFlinch = 1;
+    player.lastDamageTime = clock.getElapsedTime();
+    if (attacker){ player.lastAttacker = attacker; player.lastAttackerNet = null; }
+    var vg = document.getElementById('dmgVignette');
+    vg.style.boxShadow = 'inset 0 0 140px 30px rgba(255,59,59,0.5)';
+    setTimeout(function(){ vg.style.boxShadow = 'inset 0 0 0 0 rgba(255,59,59,0)'; }, 140);
+    if (player.hp <= 0) playerDie();
+  }
+
+  function playerDie(){
+    player.alive = false; player.hp = 0; player.state = 'dead'; player.deathT = 0;
+    player.flying = false; player.flightT = 0;
+    firstPerson = false; // always view your own death/respawn from third person
+    player.deaths++; player.streak = 0;
+    if (player.lastAttacker){
+      player.lastAttacker.kills = (player.lastAttacker.kills||0) + 1;
+      addKillFeed(player.lastAttacker.name, false);
+      if (currentMode === 'tdm'){ teamScore[player.lastAttacker.team] = (teamScore[player.lastAttacker.team]||0) + 1; checkTDMEnd(); }
+      player.lastAttacker = null;
+    }
+    // A Multiplayer Arena death has no lastAttacker/lastAttackerNet to read --
+    // the server's 'kill' message already added the killfeed line and the
+    // authoritative teamScore before calling this function (see
+    // handleArenaMessage), so there's nothing left to credit here.
+    document.getElementById('deathsNum').textContent = player.deaths;
+    document.getElementById('streakNum').textContent = 0;
+    deathEl.classList.remove('hidden');
+    var t = 3;
+    var timerEl = document.getElementById('respawnTimer');
+    timerEl.textContent = 'REDEPLOYING IN ' + t + '…';
+    var iv = setInterval(function(){
+      t--;
+      if (t <= 0){ clearInterval(iv); respawnPlayer(); }
+      else timerEl.textContent = 'REDEPLOYING IN ' + t + '…';
+    }, 1000);
+  }
+
+  function respawnPlayer(){
+    player.hp = player.maxHp; player.stamina = player.maxStamina; player.ammo = player.maxAmmo;
+    player.reloadT = -1; player.state = 'idle';
+    if (currentLevel === 'facility'){
+      player.group.position.copy(FACILITY_PLAYER_SPAWN);
+    } else {
+      var a = Math.random()*Math.PI*2, r = 6+Math.random()*6;
+      player.group.position.set(Math.cos(a)*r, 0, Math.sin(a)*r);
+    }
+    player.alive = true;
+    player.root.rotation.x = 0;
+    player.group.visible = true;
+    if (player.gun) player.gun.visible = true;
+    deathEl.classList.add('hidden');
+    if (!paused) tryEngagePointerLock();
+  }
+
+  function showHitmarker(){
+    var ch = document.getElementById('crosshair');
+    ch.classList.add('hitmarker');
+    setTimeout(function(){ ch.classList.remove('hitmarker'); }, 120);
+  }
+
+  var kfContainer = document.getElementById('killfeed');
+  function addKillFeed(botName, byPlayer){
+    var div = document.createElement('div');
+    div.className = 'kf-entry' + (byPlayer?' you':'');
+    div.innerHTML = byPlayer ? ('<b>YOU</b> downed ' + botName) : (botName + ' downed <b>YOU</b>');
+    kfContainer.appendChild(div);
+    setTimeout(function(){
+      div.style.transition = 'opacity .4s';
+      div.style.opacity = '0';
+      setTimeout(function(){ div.remove(); }, 420);
+    }, 3200);
+    while (kfContainer.children.length > 5) kfContainer.removeChild(kfContainer.firstChild);
+  }
+
+  // ---------------------------------------------------------------- bot AI
+  var botRay = new THREE.Raycaster();
+  function updateBot(bot, dt){
+    if (!bot.alive){
+      bot.respawnT -= dt;
+      if (bot.respawnT <= 0) respawnBot(bot);
+      animateCombatant(bot, dt, { moveSpeedNorm: 0, sprinting: false });
+      return;
+    }
+    // targets the nearest alive OPPOSING-team unit -- the player, another
+    // bot, or a synced multiplayer peer -- rather than always the player,
+    // so bots on both squads actually fight each other too
+    var found = findNearestEnemyFor(bot);
+    var target = found ? found.target : null;
+    var targetPos = target ? target.pos : null;
+    var distToTarget = found ? found.dist : Infinity;
+    var canSee = !!found && distToTarget < 30;
+
+    if (canSee) bot.state = distToTarget < 20 ? 'attack' : 'chase';
+    else if (bot.state !== 'patrol') bot.state = 'patrol';
+
+    var speed = 3, moveSpeedNorm = 0.35, sprinting = false;
+    if (bot.state === 'patrol'){
+      var toTarget = bot.target.clone().sub(bot.pos);
+      if (toTarget.length() < 1.2) bot.target = randomSpawn();
+      var dir = toTarget.normalize();
+      bot.pos.addScaledVector(dir, speed*dt);
+      bot.facingYaw = Math.atan2(dir.x, dir.z);
+      moveSpeedNorm = 0.4;
+    } else if (bot.state === 'chase'){
+      speed = 6.4; sprinting = true;
+      var dir2 = targetPos.clone().sub(bot.pos).setY(0).normalize();
+      bot.pos.addScaledVector(dir2, speed*dt);
+      bot.facingYaw = Math.atan2(dir2.x, dir2.z);
+      moveSpeedNorm = 1;
+    } else if (bot.state === 'attack'){
+      var dirLook = targetPos.clone().sub(bot.pos).setY(0).normalize();
+      bot.facingYaw = Math.atan2(dirLook.x, dirLook.z);
+      // presses the fight harder: keeps closing from farther out and doesn't
+      // back off nearly as much once it's in your face
+      if (distToTarget > 10){ bot.pos.addScaledVector(dirLook, 3.8*dt); moveSpeedNorm = 0.75; }
+      else if (distToTarget < 3.2){ bot.pos.addScaledVector(dirLook, -1.1*dt); moveSpeedNorm = 0.3; }
+      else moveSpeedNorm = 0.05;
+
+      bot.fireTimer -= dt;
+      if (bot.fireTimer <= 0 && target){
+        bot.fireTimer = 0.65 + Math.random()*0.35;
+        bot.recoil = 1;
+        var muzzle = bot.pos.clone(); muzzle.y = 1.4;
+        var pTarget = targetPos.clone(); pTarget.y = 1.5;
+        botRay.set(muzzle, pTarget.clone().sub(muzzle).normalize());
+        var blocked = false;
+        for (var i=0;i<colliders.length;i++){ if (botRay.ray.intersectsBox(colliders[i])) { blocked = true; break; } }
+        spawnTracer(muzzle, pTarget, 0xff3348);
+        var hitChance = blocked ? 0.05 : Math.max(0.4, 0.92 - distToTarget/28);
+        if (Math.random() < hitChance){
+          var dmgAmt = 7 + Math.random()*7;
+          if (target.kind === 'player') damagePlayer(dmgAmt, bot);
+          else if (target.kind === 'bot') damageBot(target.ref, dmgAmt, false, bot);
+          else if (target.kind === 'peer') damagePeer(target.netId, dmgAmt, false);
+        }
+      }
+    }
+    collideAndSlide(bot.pos, 0.55);
+    bot.pos.y = 0;
+    bot.group.position.copy(bot.pos);
+    bot.group.rotation.y = bot.facingYaw + Math.PI;
+
+    if (bot.recoil > 0) bot.recoil = Math.max(0, bot.recoil - dt*4);
+    if (bot.hitFlinch > 0) bot.hitFlinch = Math.max(0, bot.hitFlinch - dt*3);
+
+    animateCombatant(bot, dt, { moveSpeedNorm: moveSpeedNorm, sprinting: sprinting, aimPitchDeg: 0, hitFlinch: bot.hitFlinch });
+    bot.barSprite.quaternion.copy(camera.quaternion);
+  }
+
+  // ---------------------------------------------------------------- player movement
+  var moveVel = new THREE.Vector3();
+  var velocityY = 0, onGround = true;
+  var JUMP_SPEED = 9.2, GRAVITY = 20; // high jump: apex ~2.1m, clears the 1.15m cover barriers
+  var FLIGHT_DURATION = 6, FLIGHT_SPEED = 11, FLIGHT_CEILING = 22;
+  var flightTrailT = 0;
+
+  function tryUltimate(){
+    if (!player.alive || player.flying || player.ultCharge < 100) return;
+    player.flying = true;
+    player.flightT = FLIGHT_DURATION;
+    player.ultCharge = 0;
+    velocityY = 4;
+    spawnRing(player.group.position.clone().setY(0.1), 0xffffff, 10);
+    spawnBurst(player.group.position.clone().setY(1), 0xffffff, 30);
+  }
+
+  function updatePlayer(dt, t, camInfo){
+    if (!player.alive){ moveVel.set(0,0,0); animateCombatant(player, dt, {moveSpeedNorm:0, sprinting:false}); return; }
+
+    var forwardIn = Math.max(-1, Math.min(1, (keys['KeyW']?1:0) - (keys['KeyS']?1:0) - touchMoveY));
+    var strafeIn = Math.max(-1, Math.min(1, (keys['KeyD']?1:0) - (keys['KeyA']?1:0) + touchMoveX));
+    var hasInput = forwardIn !== 0 || strafeIn !== 0;
+
+    // no separate sprint button on mobile -- pushing the move stick to its
+    // outer edge doubles as sprint instead
+    var touchMag = Math.sqrt(touchMoveX*touchMoveX + touchMoveY*touchMoveY);
+    var wantSprint = keys['ShiftLeft'] || keys['ShiftRight'] || (IS_TOUCH && touchMag > 0.85);
+    var canSprint = wantSprint && hasInput && player.stamina > 1 && forwardIn >= 0 && !player.flying;
+    if (canSprint) player.stamina = Math.max(0, player.stamina - 32*dt);
+    else player.stamina = Math.min(player.maxStamina, player.stamina + (wantSprint?4:20)*dt);
+
+    var baseSpeed = player.baseSpeed;
+    var targetSpeed = baseSpeed * (canSprint?2.3:1);
+
+    var newPos, newY;
+
+    if (player.flying){
+      player.flightT -= dt;
+      flightTrailT -= dt;
+      if (flightTrailT <= 0){
+        flightTrailT = 0.05;
+        spawnBurst(player.group.position.clone().setY(0.3), 0xffffff, 2);
+      }
+      var dir3 = new THREE.Vector3();
+      dir3.addScaledVector(camInfo.forward, forwardIn).addScaledVector(camInfo.right, strafeIn);
+      if (dir3.lengthSq() > 0) dir3.normalize();
+      var vertical = (keys['Space']?1:0) - ((keys['ShiftLeft']||keys['ShiftRight'])?1:0);
+      dir3.y += vertical*0.9;
+      if (dir3.lengthSq() > 0) dir3.normalize();
+      moveVel.lerp(dir3.multiplyScalar(FLIGHT_SPEED), 1 - Math.pow(0.0001, dt));
+      newPos = player.group.position.clone().addScaledVector(moveVel, dt);
+      newY = Math.max(0.4, Math.min(FLIGHT_CEILING, player.group.position.y + moveVel.y*dt));
+      collideAndSlide(newPos, 0.5, newY);
+      velocityY = 0; onGround = false;
+      if (player.flightT <= 0){ player.flying = false; }
+    } else {
+      var fwdFlat = new THREE.Vector3(camInfo.forward.x,0,camInfo.forward.z).normalize();
+      var rightFlat = new THREE.Vector3(camInfo.right.x,0,camInfo.right.z).normalize();
+      var dir = new THREE.Vector3();
+      dir.addScaledVector(fwdFlat, forwardIn).addScaledVector(rightFlat, strafeIn);
+      if (dir.lengthSq() > 0) dir.normalize();
+
+      if (hasInput){
+        moveVel.lerp(dir.multiplyScalar(targetSpeed), 1 - Math.pow(0.0001, dt));
+      } else {
+        moveVel.set(0,0,0); // no movement by default / snaps to a stop
+      }
+
+      newPos = player.group.position.clone().addScaledVector(moveVel, dt);
+
+      if (keys['Space'] && onGround){ velocityY = JUMP_SPEED; onGround = false; }
+      velocityY -= GRAVITY*dt;
+      newY = player.group.position.y + velocityY*dt;
+      if (newY <= 0){ newY = 0; velocityY = 0; onGround = true; }
+
+      collideAndSlide(newPos, 0.5, newY);
+    }
+
+    player.group.position.x = newPos.x;
+    player.group.position.z = newPos.z;
+    player.group.position.y = newY;
+
+    var speedFrac = moveVel.length()/(baseSpeed*2.3);
+    var targetFov = (canSprint || player.flying) ? SPRINT_FOV : BASE_FOV;
+    camera.fov += (targetFov - camera.fov)*Math.min(1, dt*6);
+    camera.updateProjectionMatrix();
+    document.getElementById('speedlines').style.opacity = (canSprint || player.flying) ? Math.min(0.85, speedFrac) : 0;
+
+    if (t - player.lastDamageTime > 5 && player.hp < player.maxHp) player.hp = Math.min(player.maxHp, player.hp + 6*dt);
+    if (player.fireCooldown > 0) player.fireCooldown -= dt;
+    if (mouseDown && !paused) fireWeapon(camInfo);
+
+    if (player.reloadT >= 0){
+      player.reloadT += dt/1.5;
+      if (player.reloadT >= 1){ player.reloadT = -1; player.ammo = player.maxAmmo; }
+    }
+    player.cooldown.dash = Math.max(0, player.cooldown.dash - dt);
+    player.cooldown.nova = Math.max(0, player.cooldown.nova - dt);
+    player.cooldown.surge = Math.max(0, player.cooldown.surge - dt);
+    if (player.dashTrailT > 0) player.dashTrailT = Math.max(0, player.dashTrailT - dt);
+    if (player.recoil > 0) player.recoil = Math.max(0, player.recoil - dt*7);
+    if (player.hitFlinch > 0) player.hitFlinch = Math.max(0, player.hitFlinch - dt*3);
+    if (muzzleFlashLight.intensity > 0) muzzleFlashLight.intensity = Math.max(0, muzzleFlashLight.intensity - dt*30);
+
+    var aimPitchDeg = -camPitch*180/Math.PI;
+    animateCombatant(player, dt, { moveSpeedNorm: Math.min(1,speedFrac*(canSprint?1:1.6)), sprinting: canSprint, aimPitchDeg: aimPitchDeg, hitFlinch: player.hitFlinch });
+
+    if (muzzleFlashLight.intensity > 0){
+      var mw = new THREE.Vector3(); player.muzzle.getWorldPosition(mw);
+      muzzleFlashLight.position.copy(mw);
+    }
+  }
+
+  // ---------------------------------------------------------------- HUD sync
+  var crosshairEl = document.getElementById('crosshair');
+  function syncAbilitySlot(id, cd, max){
+    var el = document.getElementById(id);
+    if (!el) return;
+    var frac = 1 - cd/max;
+    var fill = el.querySelector('.ability-fill');
+    if (fill) fill.style.height = (Math.max(0,Math.min(1,frac))*100) + '%';
+    el.classList.toggle('ready', frac >= 1);
+    var num = el.querySelector('.cd-num');
+    if (num) num.textContent = cd > 0.05 ? Math.ceil(cd) : '';
+  }
+  function syncHUD(){
+    document.getElementById('hpFill').style.width = Math.max(0,player.hp) + '%';
+    document.getElementById('hpNum').textContent = Math.max(0,Math.round(player.hp));
+    document.getElementById('spFill').style.width = player.stamina + '%';
+    document.getElementById('spNum').textContent = Math.round(player.stamina);
+    document.getElementById('ammoCount').innerHTML = (player.reloadT>=0 ? '…' : player.ammo) + '<span class="max">/' + player.maxAmmo + '</span>';
+    document.getElementById('reloadTag').textContent = player.reloadT>=0 ? 'RELOADING' : ' ';
+    syncAbilitySlot('ab-dash', player.cooldown.dash, ABILITY_MAX.dash);
+    syncAbilitySlot('ab-nova', player.cooldown.nova, ABILITY_MAX.nova);
+    syncAbilitySlot('ab-surge', player.cooldown.surge, ABILITY_MAX.surge);
+    var moving = keys['KeyW']||keys['KeyA']||keys['KeyS']||keys['KeyD'];
+    crosshairEl.classList.toggle('spread', !!moving && (keys['ShiftLeft']||keys['ShiftRight']));
+    var sbTag = document.getElementById('flightTag');
+    sbTag.classList.toggle('show', player.flying);
+    if (player.flying) document.getElementById('sbNum').textContent = Math.max(0,player.flightT).toFixed(1) + 's';
+    var ultBar = document.getElementById('ultBar');
+    document.getElementById('ultFill').style.width = Math.min(100,player.ultCharge) + '%';
+    ultBar.classList.toggle('ready', player.ultCharge >= 100 && !player.flying);
+    if (IS_TOUCH) document.getElementById('btnUlt').classList.toggle('ready', player.ultCharge >= 100 && !player.flying);
+  }
+
+  // cheap ~1/sec status readout -- deliberately NOT run from the per-frame
+  // animate() loop, just a plain interval doing one small text/class update
+  var statusTagEl = document.getElementById('statusTag');
+  setInterval(function(){
+    if (!started || paused || !player.alive){ return; }
+    var combat = bots.some(function(b){ return b.alive && b.pos.distanceTo(player.group.position) < 16; });
+    statusTagEl.textContent = combat ? 'STATUS: COMBAT' : 'STATUS: NOMINAL';
+    statusTagEl.classList.toggle('combat', combat);
+  }, 1000);
+
+  // ---------------------------------------------------------------- main loop
+  var clock = new THREE.Clock();
+  function animate(){
+    requestAnimationFrame(animate);
+    var dt = Math.min(0.05, clock.getDelta());
+    var t = clock.getElapsedTime();
+
+    if (started && !paused) applyFallbackSteering(dt);
+    var camInfo = updateCamera(dt);
+
+    if (started && !paused && !matchOver){
+      updatePlayer(dt, t, camInfo);
+      bots.forEach(function(b){ updateBot(b, dt); });
+      // Multiplayer Arena's match/objective state is server-driven (see
+      // handleArenaMessage's 'kill'/'snapshot'/'matchEnd' cases) -- running
+      // the local TDM/objective clock on top of it would fight the server's
+      // own authoritative timer and score.
+      if (currentArenaMode !== 'pvp') updateMatch(dt);
+      updateNetPeers(dt);
+      if (currentArenaMode === 'pvp' && pvpWaitTagEl){
+        var enemyTeam = player.team === 'A' ? 'B' : 'A';
+        pvpWaitTagEl.classList.toggle('hidden', countPeersOnTeam(enemyTeam) > 0);
+      }
+      sendPresence(t);
+      updateFX(dt);
+      updateRain(dt);
+      syncHUD();
+      if (!fullScoreboardEl.classList.contains('hidden')) refreshFullScoreboard();
+
+      // static accent lighting with a very slow, low-amplitude ambient breathe --
+      // no strobe, no beat-driven flicker, just a gentle sense of life
+      var breathe = Math.sin(t*0.35)*0.06;
+      cyanSpot.intensity = 1.7 + breathe;
+      amberSpot.intensity = 1.5 + breathe*0.8;
+      dangerSpot.intensity = 0.9 + breathe*0.5;
+    }
+
+    if (composer) composer.render(); else renderer.render(scene, camera);
+  }
+  animate();
+
+  } // startGame
+
+})();
+</script>
